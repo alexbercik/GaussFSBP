@@ -1,0 +1,6 @@
+# Julia build artifacts and local machine-specific files
+Manifest.toml
+*.jl.cov
+*.jl.*.cov
+*.jl.mem
+/docs/build/
