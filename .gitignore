@@ -4,3 +4,6 @@ Manifest.toml
 *.jl.*.cov
 *.jl.mem
 /docs/build/
+
+# Local unregistered dependency (separate git repository)
+lib/GeneralizedGauss.jl/

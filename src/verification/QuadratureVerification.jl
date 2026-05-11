@@ -11,28 +11,28 @@ quadrature rule `(x, w)` exactly integrates a supplied set of basis functions
 # ─────────────────────────────────────────────────────────────────────────────
 
 """
-    QuadratureExactnessReport
+    QuadratureExactnessReport{T<:AbstractFloat}
 
 Result returned by `check_quadrature_exactness`.
 
 # Fields
 - `passed::Bool` — `true` iff all basis functions were integrated to within
   tolerance.
-- `max_error::Float64` — maximum absolute error over all basis functions.
-- `errors::Vector{Float64}` — per-basis-function absolute errors.
+- `max_error::T` — maximum absolute error over all basis functions.
+- `errors::Vector{T}` — per-basis-function absolute errors.
 - `reference_orders::Vector{Int}` — final Gauss-Legendre order used for each
   basis function's reference integral.
-- `min_weight::Float64` — minimum quadrature weight in the candidate rule.
+- `min_weight::T` — minimum quadrature weight in the candidate rule.
 """
-struct QuadratureExactnessReport
+struct QuadratureExactnessReport{T<:AbstractFloat}
     passed::Bool
-    max_error::Float64
-    errors::Vector{Float64}
+    max_error::T
+    errors::Vector{T}
     reference_orders::Vector{Int}
-    min_weight::Float64
-    _atol::Float64
-    _rtol::Float64
-    _reference_integrals::Vector{Float64}
+    min_weight::T
+    _atol::T
+    _rtol::T
+    _reference_integrals::Vector{T}
 end
 
 function Base.show(io::IO, r::QuadratureExactnessReport)
@@ -64,13 +64,15 @@ end
 Check whether the candidate quadrature rule with nodes `x` and weights `w`
 exactly integrates every function in `quadbasis`.
 
+The arithmetic precision is inferred from the element type of `w`.
+
 # Arguments
 - `quadbasis` — an `AbstractBasis` **or** a `Vector` of callable functions.
 - `x` — quadrature nodes (length-`n` vector).
 - `w` — quadrature weights (length-`n` vector).
 - `interval` — reference interval `(a, b)` (default `(-1.0, 1.0)`).
-- `atol` — absolute tolerance (default `1e-12`).
-- `rtol` — relative tolerance (default `1e-12`).
+- `atol` — absolute tolerance (default: precision-dependent).
+- `rtol` — relative tolerance (default: precision-dependent).
 - `max_ref_order` — maximum Gauss-Legendre order for reference integral
   (default `4096`).
 
@@ -93,16 +95,26 @@ The test passes for function `g` iff:
 """
 function check_quadrature_exactness(quadbasis, x, w;
                                     interval = (-1.0, 1.0),
-                                    atol::Float64 = 1e-12,
-                                    rtol::Float64 = 1e-12,
+                                    atol = nothing,
+                                    rtol = nothing,
                                     max_ref_order::Int = 4096)
+    # Determine arithmetic type from weights
+    T = eltype(w)
+    if T <: Integer
+        T = Float64
+    end
+
+    # Default tolerances based on precision
+    _atol = atol !== nothing ? T(atol) : T(10) * eps(T)
+    _rtol = rtol !== nothing ? T(rtol) : T(10) * eps(T)
+
     # Normalise quadbasis to a plain vector of callables
     funcs = _to_func_vector(quadbasis)
 
     nf       = length(funcs)
-    errors   = Vector{Float64}(undef, nf)
+    errors   = Vector{T}(undef, nf)
     orders   = Vector{Int}(undef, nf)
-    refs     = Vector{Float64}(undef, nf)
+    refs     = Vector{T}(undef, nf)
 
     for (k, g) in enumerate(funcs)
         # Candidate integral
@@ -110,21 +122,22 @@ function check_quadrature_exactness(quadbasis, x, w;
 
         # Reference integral (adaptive Gauss-Legendre)
         I_ref, ord = reference_integral_gausslegendre(
-            g, interval; atol = atol / 10, rtol = rtol / 10,
+            g, interval; T = T,
+            atol = _atol / 10, rtol = _rtol / 10,
             max_order = max_ref_order)
 
-        refs[k]   = I_ref
-        errors[k] = abs(I_cand - I_ref)
+        refs[k]   = T(I_ref)
+        errors[k] = abs(T(I_cand) - T(I_ref))
         orders[k] = ord
     end
 
     max_err = maximum(errors)
     # Reuse the already-computed reference integrals to determine pass/fail
-    passed = all(errors[k] <= atol + rtol * abs(refs[k]) for k in 1:nf)
-    min_wt = minimum(w)
+    passed = all(errors[k] <= _atol + _rtol * abs(refs[k]) for k in 1:nf)
+    min_wt = T(minimum(w))
 
-    return QuadratureExactnessReport(passed, max_err, errors, orders, min_wt,
-                                     atol, rtol, refs)
+    return QuadratureExactnessReport{T}(passed, max_err, errors, orders, min_wt,
+                                        _atol, _rtol, refs)
 end
 
 # ─────────────────────────────────────────────────────────────────────────────

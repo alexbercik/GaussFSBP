@@ -6,7 +6,7 @@ callable functions (and optionally their derivatives).
 """
 
 """
-    FunctionBasis{F,D} <: AbstractBasis
+    FunctionBasis{F,D,T} <: AbstractBasis
 
 A basis defined by explicit callable functions.
 
@@ -15,8 +15,8 @@ A basis defined by explicit callable functions.
 - `derivs::Union{Nothing,Vector{D}}` — optional vector of derivative callables.
   If `nothing`, calling `eval_basis_derivative` / `eval_basis_derivative_matrix`
   will throw an informative error.
-- `interval::Tuple{Float64,Float64}` — the reference interval `(a, b)` over
-  which the basis is defined (default `(-1.0, 1.0)`).
+- `interval::Tuple{T,T}` — the reference interval `(a, b)` over which the
+  basis is defined (default `(-1.0, 1.0)`).
 
 # Constructor
 
@@ -29,12 +29,16 @@ A basis defined by explicit callable functions.
 funcs  = [x -> 1.0, x -> x, x -> x^2, x -> x^3]
 derivs = [x -> 0.0, x -> 1.0, x -> 2x, x -> 3x^2]
 basis  = FunctionBasis(funcs; derivs=derivs)
+
+# BigFloat precision
+a, b = BigFloat(-1), BigFloat(1)
+basis_big = FunctionBasis(funcs; derivs=derivs, interval=(a, b))
 ```
 """
-struct FunctionBasis{F,D} <: AbstractBasis
+struct FunctionBasis{F,D,T<:Real} <: AbstractBasis
     funcs::Vector{F}
     derivs::Union{Nothing,Vector{D}}
-    interval::Tuple{Float64,Float64}
+    interval::Tuple{T,T}
 end
 
 """
@@ -47,9 +51,12 @@ specify the reference `interval` as a `(a, b)` tuple.
 """
 function FunctionBasis(funcs::Vector{F};
                        derivs = nothing,
-                       interval::Tuple{Float64,Float64} = (-1.0, 1.0)) where {F}
+                       interval = (-1.0, 1.0)) where {F}
+    # Promote interval endpoints to a common type
+    a, b = promote(interval[1], interval[2])
+    T = typeof(a)
     if derivs === nothing
-        return FunctionBasis{F,Nothing}(funcs, nothing, interval)
+        return FunctionBasis{F,Nothing,T}(funcs, nothing, (a, b))
     else
         derivs_vec = Vector(derivs)
         if length(derivs_vec) != length(funcs)
@@ -58,7 +65,7 @@ function FunctionBasis(funcs::Vector{F};
                 "length(funcs) ($(length(funcs)))."))
         end
         D = eltype(derivs_vec)
-        return FunctionBasis{F,D}(funcs, derivs_vec, interval)
+        return FunctionBasis{F,D,T}(funcs, derivs_vec, (a, b))
     end
 end
 
@@ -102,3 +109,10 @@ function eval_basis_derivative(basis::FunctionBasis, x)
     end
     return [d(x) for d in basis.derivs]
 end
+
+"""
+    eltype(::FunctionBasis{F,D,T}) -> Type{T}
+
+Return the element type (precision) of the basis interval.
+"""
+Base.eltype(::FunctionBasis{F,D,T}) where {F,D,T} = T

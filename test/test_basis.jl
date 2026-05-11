@@ -98,3 +98,32 @@ end
     derivs = [x -> 0.0]   # length mismatch
     @test_throws ArgumentError FunctionBasis(funcs; derivs = derivs)
 end
+
+@testset "GeneralizedGauss interop on FunctionBasis" begin
+    funcs = [x -> 1.0, x -> x]
+    basis = FunctionBasis(funcs)
+
+    @test length(basis) == 2
+
+    moments = compute_moments(basis)
+    @test moments[1] ≈ 2.0
+    @test moments[2] ≈ 0.0 atol=1e-12
+
+    t_report = check_T_system(basis; num_tuples=32, verbose=false)
+    @test t_report.sampled_pass
+end
+
+@testset "GeneralizedGauss rule construction on FunctionBasis" begin
+    funcs  = [x -> 1.0, x -> x]
+    derivs = [x -> 0.0, x -> 1.0]
+    basis = FunctionBasis(funcs; derivs=derivs)
+
+    w, x = compute_gauss_rule(basis; principal=:upper)
+
+    @test length(w) == 2
+    @test length(x) == 2
+    @test sum(w) ≈ 2.0 atol=1e-12
+
+    ect_report = check_ECT_system(basis; n_points=32, verbose=false)
+    @test ect_report.sampled_constant_sign
+end
