@@ -98,11 +98,14 @@ function check_quadrature_exactness(quadbasis, x, w;
                                     atol = nothing,
                                     rtol = nothing,
                                     max_ref_order::Int = 4096)
-    # Determine arithmetic type from weights
-    T = eltype(w)
-    if T <: Integer
-        T = Float64
-    end
+    x = collect(x)
+    w = collect(w)
+    T = _array_element_type(w, "quadrature weights")
+    T <: AbstractFloat || throw(ArgumentError(
+        "check_quadrature_exactness: weights must use a floating-point element type, got $T."))
+    _, _, T_interval = _interval_endpoint_type(interval, "interval")
+    _require_uniform_type("check_quadrature_exactness", [
+        T, _array_element_type(x, "quadrature nodes"), T_interval])
 
     # Default tolerances based on precision
     _atol = atol !== nothing ? T(atol) : T(10) * eps(T)

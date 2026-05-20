@@ -11,8 +11,8 @@ using GaussFSBP
 #
 # For each operator, the standard SBP verification checks are:
 #   1. Accuracy: D * V = Vx  (D differentiates the basis functions)
-#   2. SBP property: Q + Q' = B  where Q = H * D, H is the norm matrix,
-#      and B = diag(-1, 0, ..., 0, 1) encodes boundary terms.
+#   2. SBP property: Q + Q' = E  where Q = H * D, H is the norm matrix,
+#      and E encodes boundary terms.
 #   3. Interpolation/extrapolation to boundary nodes is exact.
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -22,7 +22,7 @@ using GaussFSBP
         # TODO: Once OperatorBuilders is implemented, construct the degree-p
         # LGL operator and verify:
         #   1. D * V = Vx
-        #   2. Q + Q' = B
+        #   2. Q + Q' = E
         #   3. H * ones(n) = w  (LGL weights)
         #
         # Reference: Gassner & Kopriva (2011), Carpenter & Kennedy (1994).
@@ -33,7 +33,7 @@ using GaussFSBP
         # TODO: Once OperatorBuilders is implemented, construct the degree-p
         # Legendre-Gauss (interior-node) operator and verify:
         #   1. D * V = Vx
-        #   2. Q + Q' = B  (with extrapolation operators to boundary)
+        #   2. Q + Q' = E  (with extrapolation operators to boundary)
         #   3. H * ones(n) = w  (LG weights)
         #
         # Reference: Fernández et al. (2014), Montoya & Zingg (2020).
@@ -49,8 +49,8 @@ using GaussFSBP
 
     @testset "SBP property check stub (TODO)" begin
         # TODO: Implement a generic helper
-        #   check_sbp_property(D, H, B) -> Bool
-        # verifying Q + Q' = B where Q = H * D.
+        #   check_sbp_property(D, H, E) -> Bool
+        # verifying Q + Q' = E where Q = H * D.
         @test_broken false  # placeholder — not yet implemented
     end
 

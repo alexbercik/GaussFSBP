@@ -14,6 +14,63 @@ at all nodes.
 """
 
 """
+    _sample_vector(eval, K, x, ::Type{T}) -> Vector{T}
+
+Sample a length-`K` basis vector from callable `eval` at scalar `x`.
+"""
+function _sample_vector(eval, K::Int, x, ::Type{T}; context::AbstractString = "Basis evaluator") where T
+    vals = eval(x)
+    length(vals) == K || throw(ArgumentError(
+        "$context: returned $(length(vals)) values, expected $K."))
+    out = Vector{T}(undef, K)
+    for j in 1:K
+        out[j] = vals[j]
+    end
+    return out
+end
+
+"""
+    _sample_matrix(eval, K, xnodes, ::Type{T}) -> Matrix{T}
+
+Sample basis values at all nodes into an `length(xnodes) × K` matrix.
+"""
+function _sample_matrix(eval, K::Int, xnodes, ::Type{T}; context::AbstractString = "Basis evaluator") where T
+    M = Matrix{T}(undef, length(xnodes), K)
+    for i in eachindex(xnodes)
+        vals = eval(xnodes[i])
+        length(vals) == K || throw(ArgumentError(
+            "$context: returned $(length(vals)) values at node $i, expected $K."))
+        for j in 1:K
+            M[i, j] = vals[j]
+        end
+    end
+    return M
+end
+
+"""
+    eval_basis_vector(basis::AbstractBasis, x) -> Vector
+
+Evaluate all basis functions in `basis` at scalar `x`.
+
+Returns a vector `v` of length `nbasis(basis)` where `v[j]` is basis function
+`j` evaluated at `x`.
+"""
+function eval_basis_vector(basis::FunctionBasis, x)
+    T = eltype(basis)
+    typeof(x) == T || throw(ArgumentError(
+        "eval_basis_vector: point type ($(typeof(x))) must match " *
+        "basis interval type ($T)."))
+    return _sample_vector(z -> eval_basis(basis, z), nbasis(basis), x, T;
+                          context = "eval_basis_vector")
+end
+
+function eval_basis_vector(basis::AbstractBasis, x)
+    T = typeof(x)
+    return _sample_vector(z -> eval_basis(basis, z), nbasis(basis), x, T;
+                          context = "eval_basis_vector")
+end
+
+"""
     eval_basis_matrix(basis::AbstractBasis, xnodes) -> Matrix
 
 Evaluate all basis functions in `basis` at each node in `xnodes`.
@@ -22,25 +79,20 @@ Returns a matrix `V` of size `(length(xnodes), nbasis(basis))` where
 
     V[i, j] = basis function j evaluated at xnodes[i].
 
-The element type of the matrix is inferred from the evaluation results.
+For `FunctionBasis`, nodes must match `eltype(basis)`; the matrix element
+type is `eltype(basis)`.
 """
+function eval_basis_matrix(basis::FunctionBasis, xnodes)
+    T = eltype(basis)
+    _require_nodes_match_eltype(xnodes, T, "eval_basis_matrix nodes")
+    return _sample_matrix(z -> eval_basis(basis, z), nbasis(basis), xnodes, T;
+                          context = "eval_basis_matrix")
+end
+
 function eval_basis_matrix(basis::AbstractBasis, xnodes)
-    n  = length(xnodes)
-    nb = nbasis(basis)
-    # Evaluate at the first node to determine the element type
-    vals1 = eval_basis(basis, xnodes[1])
-    T = eltype(vals1)
-    V = Matrix{T}(undef, n, nb)
-    for j in 1:nb
-        V[1, j] = vals1[j]
-    end
-    for i in 2:n
-        vals = eval_basis(basis, xnodes[i])
-        for j in 1:nb
-            V[i, j] = vals[j]
-        end
-    end
-    return V
+    T = _array_element_type(xnodes, "eval_basis_matrix nodes")
+    return _sample_matrix(z -> eval_basis(basis, z), nbasis(basis), xnodes, T;
+                          context = "eval_basis_matrix")
 end
 
 """
@@ -52,24 +104,16 @@ Evaluate the derivatives of all basis functions in `basis` at each node in
 Returns a matrix `Vx` of size `(length(xnodes), nbasis(basis))` where
 
     Vx[i, j] = derivative of basis function j evaluated at xnodes[i].
-
-The element type of the matrix is inferred from the evaluation results.
 """
+function eval_basis_derivative_matrix(basis::FunctionBasis, xnodes)
+    T = eltype(basis)
+    _require_nodes_match_eltype(xnodes, T, "eval_basis_derivative_matrix nodes")
+    return _sample_matrix(z -> eval_basis_derivative(basis, z), nbasis(basis), xnodes, T;
+                          context = "eval_basis_derivative_matrix")
+end
+
 function eval_basis_derivative_matrix(basis::AbstractBasis, xnodes)
-    n  = length(xnodes)
-    nb = nbasis(basis)
-    # Evaluate at the first node to determine the element type
-    dvals1 = eval_basis_derivative(basis, xnodes[1])
-    T = eltype(dvals1)
-    Vx = Matrix{T}(undef, n, nb)
-    for j in 1:nb
-        Vx[1, j] = dvals1[j]
-    end
-    for i in 2:n
-        dvals = eval_basis_derivative(basis, xnodes[i])
-        for j in 1:nb
-            Vx[i, j] = dvals[j]
-        end
-    end
-    return Vx
+    T = _array_element_type(xnodes, "eval_basis_derivative_matrix nodes")
+    return _sample_matrix(z -> eval_basis_derivative(basis, z), nbasis(basis), xnodes, T;
+                          context = "eval_basis_derivative_matrix")
 end

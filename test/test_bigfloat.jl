@@ -71,6 +71,7 @@ using LinearAlgebra
 
     # ═════════════════════════════════════════════════════════════════════
     # Test 3: BigFloat FSBP operator — polynomial degree 1 (GLL)
+    # uses default BigFloat precision of 256-bits, or 1.7e-75
     # ═════════════════════════════════════════════════════════════════════
 
     @testset "Polynomial degree 1 (GLL, BigFloat)" begin

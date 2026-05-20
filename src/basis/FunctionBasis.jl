@@ -52,9 +52,7 @@ specify the reference `interval` as a `(a, b)` tuple.
 function FunctionBasis(funcs::Vector{F};
                        derivs = nothing,
                        interval = (-1.0, 1.0)) where {F}
-    # Promote interval endpoints to a common type
-    a, b = promote(interval[1], interval[2])
-    T = typeof(a)
+    a, b, T = _interval_endpoint_type(interval, "FunctionBasis interval")
     if derivs === nothing
         return FunctionBasis{F,Nothing,T}(funcs, nothing, (a, b))
     else
@@ -116,3 +114,14 @@ end
 Return the element type (precision) of the basis interval.
 """
 Base.eltype(::FunctionBasis{F,D,T}) where {F,D,T} = T
+
+function _require_function_basis_intervals_match(op_basis::FunctionBasis,
+                                                 quad_basis::FunctionBasis,
+                                                 context::AbstractString)
+    Ta = eltype(op_basis)
+    Tb = eltype(quad_basis)
+    Ta == Tb || throw(ArgumentError(
+        "$context: op_basis interval type ($Ta) differs from quad_basis ($Tb). " *
+        "Use the same floating-point type on both bases."))
+    return Ta
+end

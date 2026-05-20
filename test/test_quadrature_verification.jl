@@ -23,6 +23,16 @@ const MP1_weights = [2.0]
 # Polynomial callable basis used across tests
 const poly_funcs = [x -> 1.0, x -> x, x -> x^2, x -> x^3]
 
+@testset "quadrature type consistency errors" begin
+    funcs = [x -> 1.0, x -> x]
+    @test_throws ArgumentError check_quadrature_exactness(
+        funcs, [-1.0, 1.0], [1.0, 1.0]; interval = (BigFloat(-1), BigFloat(1)))
+    @test_throws ArgumentError check_quadrature_exactness(
+        funcs, BigFloat[-1, 1], BigFloat[1, 1]; interval = (-1.0, 1.0))
+    @test_throws ArgumentError reference_integral_gausslegendre(
+        x -> 1.0, (-1.0, 1.0); T = BigFloat)
+end
+
 @testset "reference_integral_gausslegendre" begin
     # ∫_{-1}^{1} 1 dx = 2
     I1, _ = reference_integral_gausslegendre(x -> 1.0, (-1.0, 1.0))

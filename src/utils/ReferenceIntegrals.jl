@@ -67,7 +67,10 @@ function reference_integral_gausslegendre(f, interval;
                                           atol = eps(T)^(T(3)/T(4)),
                                           rtol = eps(T)^(T(3)/T(4)),
                                           max_order::Int = 4096)
-    a, b = T(interval[1]), T(interval[2])
+    _, _, T_interval = _interval_endpoint_type(interval, "reference_integral_gausslegendre interval")
+    T == T_interval || throw(ArgumentError(
+        "reference_integral_gausslegendre: keyword T ($T) must match interval type ($T_interval)."))
+    a, b = interval[1], interval[2]
     mid  = (a + b) / 2
     half = (b - a) / 2
 

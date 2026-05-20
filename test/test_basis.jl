@@ -93,6 +93,18 @@ end
     @test_throws ErrorException eval_basis_derivative_matrix(b, [0.0])
 end
 
+@testset "FunctionBasis interval type consistency" begin
+    @test_throws ArgumentError FunctionBasis([x -> x]; interval = (BigFloat(-1), 1.0))
+    @test_throws ArgumentError FunctionBasis([x -> x]; interval = (-1.0, BigFloat(1)))
+
+    basis = FunctionBasis([x -> one(x), x -> x]; interval = (BigFloat(-1), BigFloat(1)))
+    @test eltype(basis) == BigFloat
+
+    @test_throws ArgumentError eval_basis_matrix(basis, [-1.0, 1.0])
+    V = eval_basis_matrix(basis, BigFloat[-1, 1])
+    @test eltype(V) == BigFloat
+end
+
 @testset "FunctionBasis mismatched derivs error" begin
     funcs  = [x -> 1.0, x -> x]
     derivs = [x -> 0.0]   # length mismatch

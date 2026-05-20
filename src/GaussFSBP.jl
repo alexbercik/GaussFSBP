@@ -17,6 +17,11 @@ module GaussFSBP
 using LinearAlgebra
 using Printf
 using GeneralizedGauss
+import GenericLinearAlgebra
+
+# ── Utilities (type checks before basis construction) ─────────────────────────
+include("utils/TypeConsistency.jl")
+include("utils/LinearAlgebraHelpers.jl")
 
 # ── Basis ────────────────────────────────────────────────────────────────────
 include("basis/Basis.jl")
@@ -32,6 +37,7 @@ include("verification/QuadratureVerification.jl")
 
 # ── Builders ────────────────────────────────────────────────────────────────
 include("builders/OperatorBuilders.jl")
+include("builders/OptimizedOperatorBuilders.jl")
 
 # ── Verification (operator — depends on FSBPOperator from builders) ─────────
 include("verification/OperatorVerification.jl")
@@ -41,7 +47,7 @@ include("verification/OperatorVerification.jl")
 export AbstractBasis
 export nbasis, basis_functions
 export eval_basis, eval_basis_derivative
-export eval_basis_matrix, eval_basis_derivative_matrix
+export eval_basis_matrix, eval_basis_derivative_matrix, eval_basis_vector
 
 # Concrete basis types
 export FunctionBasis
@@ -51,7 +57,8 @@ export check_quadrature_exactness, QuadratureExactnessReport
 export check_fsbp_operator, FSBPOperatorReport
 
 # Operator construction
-export FSBPOperator, build_fsbp_operator
+export FSBPOperator
+export build_fsbp_operator, optimize_fsbp_operator
 
 # Reference integrals
 export reference_integral_gausslegendre

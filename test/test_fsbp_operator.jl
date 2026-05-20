@@ -153,10 +153,44 @@ using LinearAlgebra
 
 
     # ═════════════════════════════════════════════════════════════════════
-    # Test 5: use_optimization=true should error (not yet implemented)
+    # Test 4b: nn > nb without endpoint nodes
+    #   The rectangular construction must use E = tR tRᵀ - tL tLᵀ, not a
+    #   hard-coded endpoint-diagonal boundary matrix.
     # ═════════════════════════════════════════════════════════════════════
 
-    @testset "Optimization hook raises error" begin
+    @testset "Polynomial (nn > nb, GL, extrapolation boundary)" begin
+        funcs  = [x -> 1.0, x -> x]
+        derivs = [x -> 0.0, x -> 1.0]
+        op_basis = FunctionBasis(funcs; derivs=derivs, interval=(-1.0, 1.0))
+
+        qfuncs  = [let k=k; x -> x^k end for k in 0:5]
+        qderivs = [let k=k; k == 0 ? (x -> 0.0) : (x -> k * x^(k-1)) end for k in 0:5]
+        quad_basis = FunctionBasis(qfuncs; derivs=qderivs, interval=(-1.0, 1.0))
+
+        fsbp = build_fsbp_operator(op_basis, quad_basis;
+                                    orthogonalize=true, principal=:lower)
+
+        @test fsbp.nn == 3
+        @test fsbp.nn > fsbp.nb
+        @test all(abs.(fsbp.x .+ 1.0) .> 1e-8)
+        @test all(abs.(fsbp.x .- 1.0) .> 1e-8)
+        @test fsbp.E ≈ fsbp.tR * fsbp.tR' - fsbp.tL * fsbp.tL'
+
+        report = check_fsbp_operator(fsbp; atol=1e-10, rtol=1e-10)
+
+        @test report.checks["Derivative exactness"].passed
+        @test report.checks["SBP property"].passed
+        @test report.checks["Boundary decomposition"].passed
+        @test report.checks["Extrapolation exactness"].passed
+        @test report.checks["Skew-symmetry"].passed
+    end
+
+
+    # ═════════════════════════════════════════════════════════════════════
+    # Test 5: use_optimization=true builds an optimized operator
+    # ═════════════════════════════════════════════════════════════════════
+
+    @testset "Optimization hook builds operator" begin
         funcs  = [x -> 1.0, x -> x]
         derivs = [x -> 0.0, x -> 1.0]
         op_basis = FunctionBasis(funcs; derivs=derivs)
@@ -165,14 +199,39 @@ using LinearAlgebra
         qderivs = [x -> 0.0, x -> 1.0]
         quad_basis = FunctionBasis(qfuncs; derivs=qderivs)
 
-        @test_throws ErrorException build_fsbp_operator(op_basis, quad_basis;
-                                                         use_optimization=true)
+        fsbp = build_fsbp_operator(op_basis, quad_basis;
+                                   principal=:upper,
+                                   use_optimization=true,
+                                   compatibility_action=:error)
+
+        @test fsbp.nn == 2
+        @test fsbp.tL == [1.0, 0.0]
+        @test fsbp.tR == [0.0, 1.0]
+
+        report = check_fsbp_operator(fsbp; atol=1e-10, rtol=1e-10)
+        @test report.checks["Derivative exactness"].passed
+        @test report.checks["SBP property"].passed
+        @test report.checks["SBP compatibility"].passed
     end
 
 
     # ═════════════════════════════════════════════════════════════════════
     # Test 6: Basis without derivatives should error
     # ═════════════════════════════════════════════════════════════════════
+
+    @testset "Mismatched basis interval types error" begin
+        op_funcs  = [x -> one(x), x -> x]
+        op_derivs = [x -> zero(x), x -> one(x)]
+        op_basis = FunctionBasis(op_funcs; derivs=op_derivs,
+                               interval=(BigFloat(-1), BigFloat(1)))
+
+        qfuncs  = [let k=k; x -> x^k end for k in 0:3]
+        qderivs = [let k=k; k == 0 ? (x -> zero(x)) : (x -> k * x^(k-1)) end for k in 0:3]
+        quad_basis = FunctionBasis(qfuncs; derivs=qderivs, interval=(-1.0, 1.0))
+
+        @test_throws ArgumentError build_fsbp_operator(op_basis, quad_basis;
+                                                     principal=:upper)
+    end
 
     @testset "Missing derivatives raises error" begin
         funcs  = [x -> 1.0, x -> x]

@@ -7,13 +7,14 @@ verification checks on an `FSBPOperator`.
 Checks performed (all tolerances default to precision-dependent values):
 1. Derivative exactness:  D fⱼ ≈ fⱼ'  for all fⱼ ∈ F.
 2. Quadrature exactness:  Σ wᵢ g(xᵢ) ≈ ∫g  for all g ∈ G.
-3. SBP property:          Q + Qᵀ ≈ B.
+3. SBP property:          Q + Qᵀ ≈ E.
 4. Boundary decomposition: E ≈ tR tRᵀ - tL tLᵀ.
 5. Extrapolation exactness: tLᵀ fⱼ ≈ fⱼ(xL), tRᵀ fⱼ ≈ fⱼ(xR).
 6. Positive weights:       all diag(H) > 0.
 7. Weight sum:             1ᵀ H 1 ≈ xR - xL.
 8. Nullspace consistency:  rank(D) = nn - 1.
 9. Skew-symmetry of S:    S + Sᵀ ≈ 0.
+10. SBP compatibility:     Vᵀ H Vₓ + Vₓᵀ H V ≈ vR vRᵀ - vL vLᵀ.
 """
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -91,7 +92,7 @@ function check_fsbp_operator(op::FSBPOperator{T};
     # 2. Quadrature exactness
     checks["Quadrature exactness"] = _check_quadrature_exactness(op, _atol, _rtol, max_ref_order)
 
-    # 3. SBP property: Q + Qᵀ ≈ B
+    # 3. SBP property: Q + Qᵀ ≈ E
     checks["SBP property"] = _check_sbp_property(op, _atol)
 
     # 4. Boundary decomposition: E ≈ tR tRᵀ - tL tLᵀ
@@ -111,6 +112,9 @@ function check_fsbp_operator(op::FSBPOperator{T};
 
     # 9. Skew-symmetry of S
     checks["Skew-symmetry"] = _check_skew_symmetry(op, _atol)
+
+    # 10. Quadrature/SBP compatibility for exact construction
+    checks["SBP compatibility"] = _check_sbp_compatibility(op, _atol, _rtol)
 
     all_passed = all(c.passed for c in values(checks))
     return FSBPOperatorReport(all_passed, checks)
@@ -171,14 +175,14 @@ function _check_quadrature_exactness(op::FSBPOperator{T}, atol, rtol, max_ref_or
 end
 
 """
-Check 3: SBP property — Q + Qᵀ ≈ B.
+Check 3: SBP property — Q + Qᵀ ≈ E.
 """
 function _check_sbp_property(op::FSBPOperator, atol)
-    residual = op.Q + op.Q' - op.B
+    residual = op.Q + op.Q' - op.E
     max_err = maximum(abs.(residual))
     passed = max_err <= atol
 
-    detail = "‖Q + Qᵀ - B‖∞ = $(Printf.@sprintf("%.2e", Float64(max_err)))"
+    detail = "‖Q + Qᵀ - E‖∞ = $(Printf.@sprintf("%.2e", Float64(max_err)))"
     return (passed=passed, error=max_err, detail=detail)
 end
 
@@ -204,8 +208,8 @@ function _check_extrapolation_exactness(op::FSBPOperator{T}, atol, rtol) where T
 
     # tLᵀ * f  should give f(a) for each basis function
     # tRᵀ * f  should give f(b) for each basis function
-    vL = T.(eval_basis(op.op_basis, a))
-    vR = T.(eval_basis(op.op_basis, b))
+    vL = eval_basis_vector(op.op_basis, a)
+    vR = eval_basis_vector(op.op_basis, b)
 
     errors_L = [abs(dot(op.tL, V[:, j]) - vL[j]) for j in 1:op.nb]
     errors_R = [abs(dot(op.tR, V[:, j]) - vR[j]) for j in 1:op.nb]
@@ -281,5 +285,25 @@ function _check_skew_symmetry(op::FSBPOperator, atol)
     passed = max_err <= atol
 
     detail = "‖S + Sᵀ‖∞ = $(Printf.@sprintf("%.2e", Float64(max_err)))"
+    return (passed=passed, error=max_err, detail=detail)
+end
+
+"""
+Check 10: Quadrature/SBP compatibility for exact diagonal-norm construction.
+"""
+function _check_sbp_compatibility(op::FSBPOperator{T}, atol, rtol) where T
+    a, b = op.interval
+    V = Matrix{T}(eval_basis_matrix(op.op_basis, op.x))
+    Vx = Matrix{T}(eval_basis_derivative_matrix(op.op_basis, op.x))
+    vL = eval_basis_vector(op.op_basis, a)
+    vR = eval_basis_vector(op.op_basis, b)
+
+    residual = _sbp_compatibility_residual(V, Vx, op.w, vL, vR)
+    max_err = maximum(abs.(residual))
+    scale = max(one(T), maximum(abs.(vR * vR' - vL * vL')))
+    tol = atol + rtol * scale
+    passed = max_err <= tol
+
+    detail = "‖VᵀHVₓ + VₓᵀHV - (vR vRᵀ - vL vLᵀ)‖∞ = $(Printf.@sprintf("%.2e", Float64(max_err)))"
     return (passed=passed, error=max_err, detail=detail)
 end
