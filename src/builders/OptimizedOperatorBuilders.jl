@@ -19,6 +19,11 @@ first optimizes exact boundary extrapolation vectors, then constructs and
 optionally optimizes the skew-symmetric matrix using the independent-equation
 system of Marchildon and Zingg.
 
+Set `extrapolation_symmetry = :flip` to enforce `tR == reverse(tL)`.  This
+requires reflection-symmetric nodes and weights and uses a separate coupled
+extrapolation solve; the default `:none` keeps the left and right solves
+independent.
+
 # Implementation layout
 
 Both public methods share the same pipeline:
@@ -101,6 +106,7 @@ function _optimize_fsbp_preamble(x, w, xL, xR, value_eval, deriv_eval, K::Int; k
     extrapolation_norm = get(kwargs, :extrapolation_norm, :Hinv)
     derivative_error_norm = get(kwargs, :derivative_error_norm, :H)
     zero_boundary_scaling = get(kwargs, :zero_boundary_scaling, :fallback)
+    extrapolation_symmetry = get(kwargs, :extrapolation_symmetry, :none)
 
     K > 0 || throw(ArgumentError("The basis must contain at least one function."))
     _validate_norm_symbol(extrapolation_norm, (:Hinv, :H, :Euclidean, :Frobenius),
@@ -109,6 +115,8 @@ function _optimize_fsbp_preamble(x, w, xL, xR, value_eval, deriv_eval, K::Int; k
                           "derivative_error_norm")
     zero_boundary_scaling in (:fallback, :omit) ||
         throw(ArgumentError("zero_boundary_scaling must be :fallback or :omit."))
+    extrapolation_symmetry in (:none, :flip) ||
+        throw(ArgumentError("extrapolation_symmetry must be :none or :flip."))
 
     x = collect(x)
     w = collect(w)
@@ -150,6 +158,7 @@ function _optimize_fsbp_operator_core(setup, V, Vx, vL, vR, op_basis, quad_basis
                                       extrapolation_objective_weights = (accuracy = 1//2, norm = 1//2),
                                       S_objective_weights = (accuracy = 1//2, norm = 1//2),
                                       extrapolation_norm::Symbol = :Hinv,
+                                      extrapolation_symmetry::Symbol = :none,
                                       derivative_error_norm::Symbol = :H,
                                       zero_boundary_scaling::Symbol = :fallback,
                                       rank_tol = nothing,
@@ -176,6 +185,8 @@ function _optimize_fsbp_operator_core(setup, V, Vx, vL, vR, op_basis, quad_basis
     theta_ext_norm < zero(T) && throw(ArgumentError("extrapolation norm weight must be nonnegative."))
     theta_S_acc < zero(T) && throw(ArgumentError("S objective accuracy weight must be nonnegative."))
     theta_S_norm < zero(T) && throw(ArgumentError("S objective norm weight must be nonnegative."))
+    extrapolation_symmetry in (:none, :flip) ||
+        throw(ArgumentError("extrapolation_symmetry must be :none or :flip."))
 
     ext_scale_tol = extrapolation_scale_tol === nothing ? sqrt(eps(T)) : T(extrapolation_scale_tol)
     der_scale_tol = derivative_scale_tol === nothing ? sqrt(eps(T)) : T(derivative_scale_tol)
@@ -206,21 +217,37 @@ function _optimize_fsbp_operator_core(setup, V, Vx, vL, vR, op_basis, quad_basis
     # -- Basis of ker(V') when N > K (used for tL/tR optimization and the skew system).
     ZV = dim_null_V > 0 ? _nullspace_basis(V'; rank_tol = rank_tol) :
                            zeros(T, N, 0)
-    ZL = left_is_endpoint ? zeros(T, N, 0) : ZV
-    ZR = right_is_endpoint ? zeros(T, N, 0) : ZV
-    nL = size(ZL, 2)
-    nR = size(ZR, 2)
-    tL_has_free_parameters = nL > 0
-    tR_has_free_parameters = nR > 0
 
-    if verbose
-        println("  num free tL params = $nL")
-        println("  num free tR params = $nR")
-        println("\n")
+    if extrapolation_symmetry === :flip
+        _check_flip_symmetric_grid(x, w, xL, xR)
+        tL0, tR0, Zflip = _build_flip_symmetric_extrapolation(
+            V, w, vL, vR, x, xL, xR, left_endpoint_idx, right_endpoint_idx,
+            extrapolation_norm; rank_tol = rank_tol)
+        nL = size(Zflip, 2)
+        nR = nL
+        tL_has_free_parameters = nL > 0
+        tR_has_free_parameters = tL_has_free_parameters
+    else
+        ZL = left_is_endpoint ? zeros(T, N, 0) : ZV
+        ZR = right_is_endpoint ? zeros(T, N, 0) : ZV
+        nL = size(ZL, 2)
+        nR = size(ZR, 2)
+        tL_has_free_parameters = nL > 0
+        tR_has_free_parameters = nR > 0
+        # -- Compute initial tL/tR vectors OR get the exact tL=e1, tR=eN
+        tL0, tR0 = _build_extrapolation(V, x, w, vL, vR, xL, xR, extrapolation_norm)
     end
 
-    # -- Compute initial tL/tR vectors OR get the exact tL=e1, tR=eN
-    tL0, tR0 = _build_extrapolation(V, x, w, vL, vR, xL, xR, extrapolation_norm)
+    if verbose
+        println("  extrapolation symmetry = $extrapolation_symmetry")
+        if extrapolation_symmetry === :flip
+            println("  num free coupled tL/tR params = $nL")
+        else
+            println("  num free tL params = $nL")
+            println("  num free tR params = $nR")
+        end
+        println("\n")
+    end
 
     if tL_has_free_parameters || tR_has_free_parameters || verbose
         # -- Prepare the tests for the extrapolation optimization using orthogonalized test space
@@ -233,14 +260,21 @@ function _optimize_fsbp_operator_core(setup, V, Vx, vL, vR, op_basis, quad_basis
     end
 
     if tL_has_free_parameters || tR_has_free_parameters
-        tL, tR = _optimize_extrapolation(tL0, tR0, ZL, ZR, ext_tests, w,
-                                         extrapolation_norm, 
-                                         theta_ext_acc, theta_ext_norm,
-                                         J_ext_L_initial, J_ext_R_initial,
-                                         obj_tol;
-                                         tL_has_free_parameters = tL_has_free_parameters,
-                                         tR_has_free_parameters = tR_has_free_parameters,
-                                         rank_tol = rank_tol)
+        if extrapolation_symmetry === :flip
+            tL, tR = _optimize_flip_symmetric_extrapolation(
+                tL0, Zflip, ext_tests, w, extrapolation_norm,
+                theta_ext_acc, theta_ext_norm, J_ext_L_initial, J_ext_R_initial,
+                obj_tol; rank_tol = rank_tol)
+        else
+            tL, tR = _optimize_extrapolation(tL0, tR0, ZL, ZR, ext_tests, w,
+                                             extrapolation_norm,
+                                             theta_ext_acc, theta_ext_norm,
+                                             J_ext_L_initial, J_ext_R_initial,
+                                             obj_tol;
+                                             tL_has_free_parameters = tL_has_free_parameters,
+                                             tR_has_free_parameters = tR_has_free_parameters,
+                                             rank_tol = rank_tol)
+        end
     else
         tL, tR = tL0, tR0
     end
@@ -260,8 +294,12 @@ function _optimize_fsbp_operator_core(setup, V, Vx, vL, vR, op_basis, quad_basis
         ext_exact_R = _euclidean_norm(V' * tR - vR)
 
         println("After extrapolation stage:")
-        println("  tL optimization active = $tL_has_free_parameters")
-        println("  tR optimization active = $tR_has_free_parameters")
+        if extrapolation_symmetry === :flip
+            println("  coupled tL/tR optimization active = $tL_has_free_parameters")
+        else
+            println("  tL optimization active = $tL_has_free_parameters")
+            println("  tR optimization active = $tR_has_free_parameters")
+        end
         println("  norm backend = $extrapolation_norm")
         println("  initial tL accuracy objective = $(J_ext_L_initial.accuracy)")
         println("    final tL accuracy objective = $(J_ext_L_final.accuracy)")
@@ -662,6 +700,86 @@ function _minimum_extrapolation_solution(V, w, b, norm_backend::Symbol)
     return MV * (G \ b)
 end
 
+function _symmetry_tolerance(scale, ::Type{T}) where T
+    return T(100) * sqrt(eps(T)) * max(one(T), scale)
+end
+
+function _check_flip_symmetric_grid(x, w, xL, xR)
+    T = eltype(x)
+    node_scale = max(one(T), maximum(abs.(x)), abs(xL), abs(xR))
+    node_tol = _symmetry_tolerance(node_scale, T)
+    center = xL + xR
+    node_err = maximum(abs.(x .+ reverse(x) .- center))
+    node_err <= node_tol || throw(ArgumentError(
+        "extrapolation_symmetry=:flip requires reflection-paired nodes; " *
+        "max |x[i] + x[N+1-i] - (xL+xR)| = $node_err exceeds $node_tol."))
+
+    weight_scale = max(one(T), maximum(abs.(w)))
+    weight_tol = _symmetry_tolerance(weight_scale, T)
+    weight_err = maximum(abs.(w .- reverse(w)))
+    weight_err <= weight_tol || throw(ArgumentError(
+        "extrapolation_symmetry=:flip requires reflection-paired weights; " *
+        "max |w[i] - w[N+1-i]| = $weight_err exceeds $weight_tol."))
+    return nothing
+end
+
+function _minimum_extrapolation_constraint_solution(C, w, d, norm_backend::Symbol;
+                                                    rank_tol)
+    Ct = Matrix(transpose(C))
+    if norm_backend === :Hinv
+        MinvCt = _scale_rows(Ct, w)
+    elseif norm_backend === :H
+        MinvCt = _divide_rows(Ct, w)
+    elseif norm_backend in (:Euclidean, :Frobenius)
+        MinvCt = Ct
+    else
+        throw(ArgumentError("Unsupported extrapolation norm $norm_backend."))
+    end
+    return MinvCt * _pseudoinverse_solve(C * MinvCt, d; rank_tol = rank_tol)
+end
+
+function _check_constraint_residual(C, t, d, context::AbstractString)
+    T = eltype(t)
+    residual = _euclidean_norm(C * t - d)
+    scale = max(one(T), _frobenius_norm(C) * _euclidean_norm(t), _euclidean_norm(d))
+    tol = T(1000) * sqrt(eps(T)) * scale
+    residual <= tol || throw(ArgumentError(
+        "$context: exact flip-symmetric extrapolation constraints are inconsistent; " *
+        "residual $residual exceeds $tol."))
+    return nothing
+end
+
+function _build_flip_symmetric_extrapolation(V, w, vL, vR, x, xL, xR,
+                                             left_endpoint_idx,
+                                             right_endpoint_idx,
+                                             norm_backend::Symbol; rank_tol)
+    T = eltype(w)
+    N = length(w)
+    if left_endpoint_idx !== nothing || right_endpoint_idx !== nothing
+        if left_endpoint_idx === nothing || right_endpoint_idx === nothing
+            throw(ArgumentError(
+                "extrapolation_symmetry=:flip requires both boundary endpoints to be nodes, or neither."))
+        end
+        expected_right_idx = N + 1 - left_endpoint_idx
+        right_endpoint_idx == expected_right_idx || throw(ArgumentError(
+            "extrapolation_symmetry=:flip requires endpoint nodes to be reverse pairs; " *
+            "left endpoint index $left_endpoint_idx maps to $expected_right_idx, " *
+            "but right endpoint index is $right_endpoint_idx."))
+        tL0 = zeros(T, N)
+        tL0[left_endpoint_idx] = one(T)
+        tR0 = reverse(tL0)
+        return tL0, tR0, zeros(T, N, 0)
+    end
+
+    C = vcat(transpose(V), transpose(reverse(V; dims = 1)))
+    d = vcat(vL, vR)
+    tL0 = _minimum_extrapolation_constraint_solution(C, w, d, norm_backend;
+                                                     rank_tol = rank_tol)
+    _check_constraint_residual(C, tL0, d, "extrapolation_symmetry=:flip")
+    Zflip = _nullspace_basis(C; rank_tol = rank_tol)
+    return tL0, reverse(tL0), Zflip
+end
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Extrapolation optimization
 # ─────────────────────────────────────────────────────────────────────────────
@@ -822,16 +940,14 @@ function _optimize_extrapolation(tL0, tR0, ZL, ZR, tests, w, norm_backend,
     return tL, tR
 end
 
-function _optimize_extrapolation_boundary(t0, Z, tests, w, norm_backend,
-                                          theta_acc, theta_norm, obj_tol;
-                                          side::Symbol, J_acc0, J_norm0,
-                                          rank_tol)
+function _append_extrapolation_boundary_rows!(rows, rhs, t0, Z, tests, w,
+                                              norm_backend, theta_acc,
+                                              theta_norm, J, obj_tol;
+                                              side::Symbol)
     T = eltype(t0)
     nvars = size(Z, 2)
-    nvars == 0 && return t0
-
-    rows = Vector{Vector{T}}()
-    rhs = T[]
+    J_acc0 = J.accuracy
+    J_norm0 = J.norm
 
     # ── Accuracy block (active if θ_acc > 0 and J_acc0 > obj_tol) ───────────
     # Boundary residual for one test (ω = t.omega, δ = boundary scale):
@@ -893,6 +1009,23 @@ function _optimize_extrapolation_boundary(t0, Z, tests, w, norm_backend,
             _append_row!(rows, rhs, row, global_scale * base[i])
         end
     end
+    return use_direct_lsq
+end
+
+function _optimize_extrapolation_boundary(t0, Z, tests, w, norm_backend,
+                                          theta_acc, theta_norm, obj_tol;
+                                          side::Symbol, J_acc0, J_norm0,
+                                          rank_tol)
+    T = eltype(t0)
+    nvars = size(Z, 2)
+    nvars == 0 && return t0
+
+    rows = Vector{Vector{T}}()
+    rhs = T[]
+    J = (accuracy = J_acc0, norm = J_norm0)
+    use_direct_lsq = _append_extrapolation_boundary_rows!(
+        rows, rhs, t0, Z, tests, w, norm_backend, theta_acc, theta_norm, J, obj_tol;
+        side = side)
 
     isempty(rows) && return t0
     A, b = _rows_to_matrix(rows, rhs, nvars, T)
@@ -902,6 +1035,31 @@ function _optimize_extrapolation_boundary(t0, Z, tests, w, norm_backend,
     a = -_least_squares_solve(A, b; rank_tol = rank_tol,
                               prefer_direct = use_direct_lsq)
     return t0 + Z * a
+end
+
+function _optimize_flip_symmetric_extrapolation(tL0, Zflip, tests, w, norm_backend,
+                                                theta_acc, theta_norm, J_L, J_R,
+                                                obj_tol; rank_tol)
+    T = eltype(tL0)
+    nvars = size(Zflip, 2)
+    tR0 = reverse(tL0)
+    nvars == 0 && return tL0, tR0
+
+    rows = Vector{Vector{T}}()
+    rhs = T[]
+    use_direct_lsq = _append_extrapolation_boundary_rows!(
+        rows, rhs, tL0, Zflip, tests, w, norm_backend, theta_acc, theta_norm,
+        J_L, obj_tol; side = :left)
+    use_direct_lsq = _append_extrapolation_boundary_rows!(
+        rows, rhs, tR0, reverse(Zflip; dims = 1), tests, w, norm_backend,
+        theta_acc, theta_norm, J_R, obj_tol; side = :right) || use_direct_lsq
+
+    isempty(rows) && return tL0, tR0
+    A, b = _rows_to_matrix(rows, rhs, nvars, T)
+    a = -_least_squares_solve(A, b; rank_tol = rank_tol,
+                              prefer_direct = use_direct_lsq)
+    tL = tL0 + Zflip * a
+    return tL, reverse(tL)
 end
 
 # ─────────────────────────────────────────────────────────────────────────────

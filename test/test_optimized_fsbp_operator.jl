@@ -68,6 +68,7 @@ using LinearAlgebra
             seekstart(io)
             read(io, String)
         end
+        @test occursin("extrapolation symmetry = none", verbose_output)
         @test occursin("num free tL params", verbose_output)
         @test occursin("num free tR params", verbose_output)
         @test occursin("tL optimization active", verbose_output)
@@ -75,6 +76,64 @@ using LinearAlgebra
         @test occursin("initial tL accuracy objective", verbose_output)
         @test occursin("initial tR accuracy objective", verbose_output)
         @test !occursin("initial extrapolation accuracy objective", verbose_output)
+    end
+
+    @testset "flip-symmetric extrapolation" begin
+        a = sqrt(3.0 / 7.0 + 2.0 * sqrt(6.0 / 5.0) / 7.0)
+        b = sqrt(3.0 / 7.0 - 2.0 * sqrt(6.0 / 5.0) / 7.0)
+        w_outer = (18.0 - sqrt(30.0)) / 36.0
+        w_inner = (18.0 + sqrt(30.0)) / 36.0
+        x = [-a, -b, b, a]
+        w = [w_outer, w_inner, w_inner, w_outer]
+
+        funcs = [x -> 1.0, x -> x]
+        derivs = [x -> 0.0, x -> 1.0]
+        tests = [x -> x^2, x -> x^3]
+        test_derivs = [x -> 2.0 * x, x -> 3.0 * x^2]
+
+        op = optimize_fsbp_operator(x, w, -1.0, 1.0, funcs, derivs;
+                                    test_functions = tests,
+                                    test_derivatives = test_derivs,
+                                    extrapolation_symmetry = :flip,
+                                    compatibility_action = :error)
+
+        V = eval_basis_matrix(op.op_basis, op.x)
+        vL = eval_basis_vector(op.op_basis, -1.0)
+        vR = eval_basis_vector(op.op_basis, 1.0)
+
+        @test op.tR == reverse(op.tL)
+        @test norm(V' * op.tL - vL) < 1e-10
+        @test norm(V' * op.tR - vR) < 1e-10
+
+        endpoint_op = optimize_fsbp_operator([-1.0, 0.0, 1.0],
+                                             [1.0 / 3.0, 4.0 / 3.0, 1.0 / 3.0],
+                                             -1.0, 1.0, funcs, derivs;
+                                             extrapolation_symmetry = :flip,
+                                             compatibility_action = :error)
+        @test endpoint_op.tL == [1.0, 0.0, 0.0]
+        @test endpoint_op.tR == [0.0, 0.0, 1.0]
+
+        verbose_output = mktemp() do _, io
+            redirect_stdout(io) do
+                optimize_fsbp_operator(x, w, -1.0, 1.0, funcs, derivs;
+                                       test_functions = tests,
+                                       test_derivatives = test_derivs,
+                                       extrapolation_symmetry = :flip,
+                                       compatibility_action = :error,
+                                       verbose = true)
+            end
+            flush(io)
+            seekstart(io)
+            read(io, String)
+        end
+        @test occursin("extrapolation symmetry = flip", verbose_output)
+        @test occursin("num free coupled tL/tR params", verbose_output)
+        @test occursin("coupled tL/tR optimization active", verbose_output)
+
+        @test_throws ArgumentError optimize_fsbp_operator([-0.9, 0.0, 1.0],
+                                                          [1.0, 1.0, 1.0],
+                                                          -1.0, 1.0, funcs, derivs;
+                                                          extrapolation_symmetry = :flip)
     end
 
     @testset "split extrapolation normalization" begin
