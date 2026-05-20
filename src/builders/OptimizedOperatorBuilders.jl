@@ -210,56 +210,71 @@ function _optimize_fsbp_operator_core(setup, V, Vx, vL, vR, op_basis, quad_basis
     ZR = right_is_endpoint ? zeros(T, N, 0) : ZV
     nL = size(ZL, 2)
     nR = size(ZR, 2)
-    has_extrapolation_free_parameters = (nL + nR) > 0
+    tL_has_free_parameters = nL > 0
+    tR_has_free_parameters = nR > 0
 
     if verbose
-        println("  num free tL/tR params = $(nL + nR)")
+        println("  num free tL params = $nL")
+        println("  num free tR params = $nR")
         println("\n")
     end
 
     # -- Compute initial tL/tR vectors OR get the exact tL=e1, tR=eN
     tL0, tR0 = _build_extrapolation(V, x, w, vL, vR, xL, xR, extrapolation_norm)
 
-    if has_extrapolation_free_parameters || verbose
+    if tL_has_free_parameters || tR_has_free_parameters || verbose
         # -- Prepare the tests for the extrapolation optimization using orthogonalized test space
         ext_tests = _build_extrapolation_tests(test_samples, weights, w,
                                                zero_boundary_scaling, ext_scale_tol)
-        J_ext_acc_initial = _extrapolation_accuracy_objective(tL0, tR0, ext_tests)
-        J_ext_norm_initial = _extrapolation_norm_objective(tL0, tR0, w, extrapolation_norm)
+        J_ext_L_initial = _tL_extrapolation_objectives(tL0, ext_tests, w, extrapolation_norm)
+        J_ext_R_initial = _tR_extrapolation_objectives(tR0, ext_tests, w, extrapolation_norm)
     else
         ext_tests = NamedTuple[]
     end
 
-    if has_extrapolation_free_parameters
+    if tL_has_free_parameters || tR_has_free_parameters
         tL, tR = _optimize_extrapolation(tL0, tR0, ZL, ZR, ext_tests, w,
-                                         extrapolation_norm, theta_ext_acc,
-                                         theta_ext_norm, J_ext_acc_initial,
-                                         J_ext_norm_initial, obj_tol;
+                                         extrapolation_norm, 
+                                         theta_ext_acc, theta_ext_norm,
+                                         J_ext_L_initial, J_ext_R_initial,
+                                         obj_tol;
+                                         tL_has_free_parameters = tL_has_free_parameters,
+                                         tR_has_free_parameters = tR_has_free_parameters,
                                          rank_tol = rank_tol)
     else
         tL, tR = tL0, tR0
     end
 
     if verbose
-        if has_extrapolation_free_parameters
-            J_ext_acc_final = _extrapolation_accuracy_objective(tL, tR, ext_tests)
-            J_ext_norm_final = _extrapolation_norm_objective(tL, tR, w, extrapolation_norm)
+        J_ext_L_final = if tL_has_free_parameters
+            _tL_extrapolation_objectives(tL, ext_tests, w, extrapolation_norm)
         else
-            J_ext_acc_final = J_ext_acc_initial
-            J_ext_norm_final = J_ext_norm_initial
+            J_ext_L_initial
+        end
+        J_ext_R_final = if tR_has_free_parameters
+            _tR_extrapolation_objectives(tR, ext_tests, w, extrapolation_norm)
+        else
+            J_ext_R_initial
         end
         ext_exact_L = _euclidean_norm(V' * tL - vL)
         ext_exact_R = _euclidean_norm(V' * tR - vR)
 
         println("After extrapolation stage:")
-        println("  extrapolation optimization active = $has_extrapolation_free_parameters")
+        println("  tL optimization active = $tL_has_free_parameters")
+        println("  tR optimization active = $tR_has_free_parameters")
         println("  norm backend = $extrapolation_norm")
-        println("  initial extrapolation accuracy objective = $J_ext_acc_initial")
-        println("  final extrapolation accuracy objective = $J_ext_acc_final")
-        println("  accuracy ratio final/initial = $(_objective_ratio(J_ext_acc_final, J_ext_acc_initial))")
-        println("  initial extrapolation norm objective = $J_ext_norm_initial")
-        println("  final extrapolation norm objective = $J_ext_norm_final")
-        println("  norm ratio final/initial = $(_objective_ratio(J_ext_norm_final, J_ext_norm_initial))")
+        println("  initial tL accuracy objective = $(J_ext_L_initial.accuracy)")
+        println("    final tL accuracy objective = $(J_ext_L_final.accuracy)")
+        println("            ratio final/initial = $(_objective_ratio(J_ext_L_final.accuracy, J_ext_L_initial.accuracy))")
+        println("  initial tR accuracy objective = $(J_ext_R_initial.accuracy)")
+        println("    final tR accuracy objective = $(J_ext_R_final.accuracy)")
+        println("            ratio final/initial = $(_objective_ratio(J_ext_R_final.accuracy, J_ext_R_initial.accuracy))")
+        println("  initial tL norm objective = $(J_ext_L_initial.norm)")
+        println("    final tL norm objective = $(J_ext_L_final.norm)")
+        println("        ratio final/initial = $(_objective_ratio(J_ext_L_final.norm, J_ext_L_initial.norm))")
+        println("  initial tR norm objective = $(J_ext_R_initial.norm)")
+        println("    final tR norm objective = $(J_ext_R_final.norm)")
+        println("        ratio final/initial = $(_objective_ratio(J_ext_R_final.norm, J_ext_R_initial.norm))")
         println("  ||V^T tL - v_L|| = $ext_exact_L")
         println("  ||V^T tR - v_R|| = $ext_exact_R")
     end
@@ -413,6 +428,7 @@ function _optimize_fsbp_operator_core(setup, V, Vx, vL, vR, op_basis, quad_basis
             re_J = real.(eigvals_J)
             println("  Re(λ) range (D + H⁻¹ tL tLᵀ) = [$(minimum(re_J)), $(maximum(re_J))]")
         end
+        println("\n")
     end
 
     return FSBPOperator{T}(D, Diagonal(w), Q, S, E, tL, tR, x, w,
@@ -693,24 +709,52 @@ function _build_extrapolation_tests(samples, weights, w,
 end
 
 function _extrapolation_accuracy_objective(tL, tR, tests)
-    T = eltype(tL)
+    # -- Deprecated, use _tL_extrapolation_objectives / _tR_extrapolation_objectives
+    return _extrapolation_accuracy_objective_boundary(tL, tests, :left) +
+           _extrapolation_accuracy_objective_boundary(tR, tests, :right)
+end
+
+function _extrapolation_accuracy_objective_boundary(t, tests, side::Symbol)
+    T = eltype(t)
     total = zero(T)
-    for t in tests
-        if t.activeL
-            errL = (dot(tL, t.g_perp) - t.gL_perp) / t.deltaL
-            total += t.omega * errL * errL
+    if side === :left
+        for test in tests
+            if test.activeL
+                err = (dot(t, test.g_perp) - test.gL_perp) / test.deltaL
+                total += test.omega * err * err
+            end
         end
-        if t.activeR
-            errR = (dot(tR, t.g_perp) - t.gR_perp) / t.deltaR
-            total += t.omega * errR * errR
+    elseif side === :right
+        for test in tests
+            if test.activeR
+                err = (dot(t, test.g_perp) - test.gR_perp) / test.deltaR
+                total += test.omega * err * err
+            end
         end
+    else
+        throw(ArgumentError("extrapolation boundary must be :left or :right, got $side."))
     end
     return total
 end
 
 function _extrapolation_norm_objective(tL, tR, w, norm_backend::Symbol)
+    # -- Deprecated, use _tL_extrapolation_objectives / _tR_extrapolation_objectives
     return _weighted_norm2(tL, w, norm_backend) +
            _weighted_norm2(tR, w, norm_backend)
+end
+
+function _extrapolation_norm_objective_boundary(t, w, norm_backend::Symbol)
+    return _weighted_norm2(t, w, norm_backend)
+end
+
+function _tL_extrapolation_objectives(tL, tests, w, norm_backend::Symbol)
+    return (accuracy = _extrapolation_accuracy_objective_boundary(tL, tests, :left),
+            norm = _extrapolation_norm_objective_boundary(tL, w, norm_backend))
+end
+
+function _tR_extrapolation_objectives(tR, tests, w, norm_backend::Symbol)
+    return (accuracy = _extrapolation_accuracy_objective_boundary(tR, tests, :right),
+            norm = _extrapolation_norm_objective_boundary(tR, w, norm_backend))
 end
 
 function _append_row!(rows, rhs, row, constant)
@@ -736,60 +780,87 @@ Refine `tL0`, `tR0` in `ker(V')` with one weighted least-squares step.  Columns 
 `ZL`, `ZR` span the nullspace of `V'`; exactness `V' t = v` is preserved because
 `V' Z = 0`.
 
-Parameterization (free coefficients `a = [aL; aR]`):
+Parameterization, solved independently at each boundary:
 
     tL = tL0 + ZL*aL,    tR = tR0 + ZR*aR
 
-Objectives at the starting point (see `_extrapolation_accuracy_objective`,
-`_extrapolation_norm_objective`):
+Objectives at the starting point are normalized separately for each boundary:
 
-    J_acc(tL,tR)  = Σ_m ω_m ( ⟨tL,g_m^⊥⟩ - g_{L,m}^⊥ )^2 / δ_{L,m}^2  +  (right)
-    J_norm(tL,tR) = ‖tL‖_norm^2 + ‖tR‖_norm^2
+    J_acc,L(tL)  = Σ_m ω_m ( ⟨tL,g_m^⊥⟩ - g_{L,m}^⊥ )^2 / δ_{L,m}^2
+    J_acc,R(tR)  = Σ_m ω_m ( ⟨tR,g_m^⊥⟩ - g_{R,m}^⊥ )^2 / δ_{R,m}^2
+    J_norm,L(tL) = ‖tL‖_norm^2,    J_norm,R(tR) = ‖tR‖_norm^2
 
-Each block below writes its affine residuals in `a` as rows `row` with rhs `constant`
-(`row' a + constant`), stacks them, and solves `A a ≈ -b` for the exact
-quadratic minimizer, then updates `tL`, `tR`.
+For each boundary, the helper writes affine residuals in `a` as rows `row`
+with rhs `constant` (`row' a + constant`), stacks them, solves `A a ≈ -b`
+for the exact quadratic minimizer, and updates the boundary vector.
 """
 function _optimize_extrapolation(tL0, tR0, ZL, ZR, tests, w, norm_backend,
-                                 theta_acc, theta_norm, J_acc0, J_norm0, obj_tol;
+                                 theta_acc, theta_norm, J_L, J_R, obj_tol;
+                                 tL_has_free_parameters::Bool,
+                                 tR_has_free_parameters::Bool,
                                  rank_tol)
-    T = eltype(tL0)
-    nL = size(ZL, 2)
-    nR = size(ZR, 2)
-    nvars = nL + nR
-    nvars == 0 && return tL0, tR0
+    tL = if tL_has_free_parameters
+        _optimize_extrapolation_boundary(tL0, ZL, tests, w, norm_backend,
+                                         theta_acc, theta_norm, obj_tol;
+                                         side = :left,
+                                         J_acc0 = J_L.accuracy,
+                                         J_norm0 = J_L.norm,
+                                         rank_tol = rank_tol)
+    else
+        tL0
+    end
+    tR = if tR_has_free_parameters
+        _optimize_extrapolation_boundary(tR0, ZR, tests, w, norm_backend,
+                                         theta_acc, theta_norm, obj_tol;
+                                         side = :right,
+                                         J_acc0 = J_R.accuracy,
+                                         J_norm0 = J_R.norm,
+                                         rank_tol = rank_tol)
+    else
+        tR0
+    end
+    return tL, tR
+end
+
+function _optimize_extrapolation_boundary(t0, Z, tests, w, norm_backend,
+                                          theta_acc, theta_norm, obj_tol;
+                                          side::Symbol, J_acc0, J_norm0,
+                                          rank_tol)
+    T = eltype(t0)
+    nvars = size(Z, 2)
+    nvars == 0 && return t0
 
     rows = Vector{Vector{T}}()
     rhs = T[]
 
     # ── Accuracy block (active if θ_acc > 0 and J_acc0 > obj_tol) ───────────
-    # Left-boundary residual for one test (ω = t.omega, δ = t.deltaL):
+    # Boundary residual for one test (ω = t.omega, δ = boundary scale):
     #
-    #   r_L(a) = (√ω / δ) ( ⟨tL, g^⊥⟩ - g_L^⊥ )
-    #          = (√ω / δ) ( ⟨tL0, g^⊥⟩ - g_L^⊥ + aL' (ZL' g^⊥) )
+    #   r(a) = (√ω / δ) ( ⟨t, g^⊥⟩ - g_boundary^⊥ )
+    #        = (√ω / δ) ( ⟨t0, g^⊥⟩ - g_boundary^⊥ + a' (Z' g^⊥) )
     #
     # Now stack row' a + constant ≈ 0 with
-    #   row[1:nL]   = (√ω / δ) (ZL' g^⊥) * global_scale,   global_scale = √(θ_acc / J_acc0)
-    #   constant    = (√ω / δ) ( ⟨tL0, g^⊥⟩ - g_L^⊥ ) * global_scale  (= r_L(0) at a = 0)
+    #   row       = (√ω / δ) (Z' g^⊥) * global_scale,   global_scale = √(θ_acc / J_acc0)
+    #   constant  = (√ω / δ) ( ⟨t0, g^⊥⟩ - g_boundary^⊥ ) * global_scale  (= r(0))
     #
-    # So row' a + constant = global_scale * r_L(a).  Minimize ‖global_scale * r_L(a)‖^2
+    # So row' a + constant = global_scale * r(a).  Minimize ‖global_scale * r(a)‖^2
     # After stacking all rows (accuracy + norm), we get A[i,:] = row_i,  b[i] = constant_i,
     # so minimizing ||A a + b||_2^2 drives the objective function toward zero.
     if theta_acc > zero(T) && J_acc0 > obj_tol
         global_scale = sqrt(theta_acc / J_acc0)
         for t in tests
             sqrtomega = sqrt(t.omega)
-            if t.activeL && nL > 0
+            if side === :left && t.activeL
                 row = zeros(T, nvars)
-                row[1:nL] .= (ZL' * t.g_perp) .* (sqrtomega * global_scale / t.deltaL)
-                constant = (dot(tL0, t.g_perp) - t.gL_perp) *
+                row .= (Z' * t.g_perp) .* (sqrtomega * global_scale / t.deltaL)
+                constant = (dot(t0, t.g_perp) - t.gL_perp) *
                            sqrtomega * global_scale / t.deltaL
                 _append_row!(rows, rhs, row, constant)
             end
-            if t.activeR && nR > 0
+            if side === :right && t.activeR
                 row = zeros(T, nvars)
-                row[(nL + 1):nvars] .= (ZR' * t.g_perp) .* (sqrtomega * global_scale / t.deltaR)
-                constant = (dot(tR0, t.g_perp) - t.gR_perp) *
+                row .= (Z' * t.g_perp) .* (sqrtomega * global_scale / t.deltaR)
+                constant = (dot(t0, t.g_perp) - t.gR_perp) *
                            sqrtomega * global_scale / t.deltaR
                 _append_row!(rows, rhs, row, constant)
             end
@@ -797,53 +868,40 @@ function _optimize_extrapolation(tL0, tR0, ZL, ZR, tests, w, norm_backend,
     end
 
     # ── Norm block (active if θ_norm > 0 and J_norm0 > obj_tol) ──────────────
-    # J_norm(tL,tR) = ‖tL‖_norm^2 + ‖tR‖_norm^2.  With s = norm_scale (so ‖t‖_norm^2 = ‖s⊙t‖_2^2),
-    # and tL = tL0 + ZL*aL, the left nodal component i is affine in a:
+    # J_norm(t) = ‖t‖_norm^2.  With s = norm_scale (so ‖t‖_norm^2 = ‖s⊙t‖_2^2),
+    # and t = t0 + Z*a, nodal component i is affine in a:
     #
-    #   u_{L,i}(a) = s_i t_{L,i}(a) = s_i t_{L0,i} + Σ_j Zscaled[i,j] a_{L,j}
-    #              = base[i] + Zscaled[i,:]' aL,    base = s ⊙ tL0,  Zscaled[i,j] = s_i ZL[i,j]
+    #   u_i(a) = s_i t_i(a) = s_i t0_i + Σ_j Zscaled[i,j] a_j
+    #          = base[i] + Zscaled[i,:]' a,    base = s ⊙ t0,  Zscaled[i,j] = s_i Z[i,j]
     #
     # Stack row' a + constant ≈ 0 with  global_scale = √(θ_norm / J_norm0)
-    #   row[1:nL]   = global_scale * Zscaled[i, :]
-    #   constant    = global_scale * base[i]  (= global_scale * u_{L,i}(0) at a = 0)
+    #   row         = global_scale * Zscaled[i, :]
+    #   constant    = global_scale * base[i]  (= global_scale * u_i(0) at a = 0)
     #
-    # So row' a + constant = global_scale * u_{L,i}(a).  We minimize ‖global_scale * u_{L,i}(a)‖^2
+    # So row' a + constant = global_scale * u_i(a).  We minimize ‖global_scale * u_i(a)‖^2
     # Together with the accuracy rows, A[i,:] = row_i, b[i] = constant_i and
     # min ||A a + b||_2^2 is exact quadratic minimization.
     use_direct_lsq = theta_norm > zero(T) && J_norm0 > obj_tol
     if use_direct_lsq
         global_scale = sqrt(theta_norm / J_norm0)
         norm_scale = _residual_norm_scale(w, norm_backend)
-        if nL > 0
-            base = norm_scale .* tL0
-            Zscaled = ZL .* reshape(norm_scale, :, 1)
-            for i in eachindex(base)
-                row = zeros(T, nvars)
-                row[1:nL] .= global_scale .* Zscaled[i, :]
-                _append_row!(rows, rhs, row, global_scale * base[i])
-            end
-        end
-        if nR > 0
-            base = norm_scale .* tR0
-            Zscaled = ZR .* reshape(norm_scale, :, 1)
-            for i in eachindex(base)
-                row = zeros(T, nvars)
-                row[(nL + 1):nvars] .= global_scale .* Zscaled[i, :]
-                _append_row!(rows, rhs, row, global_scale * base[i])
-            end
+        base = norm_scale .* t0
+        Zscaled = Z .* reshape(norm_scale, :, 1)
+        for i in eachindex(base)
+            row = zeros(T, nvars)
+            row .= global_scale .* Zscaled[i, :]
+            _append_row!(rows, rhs, row, global_scale * base[i])
         end
     end
 
-    isempty(rows) && return tL0, tR0
+    isempty(rows) && return t0
     A, b = _rows_to_matrix(rows, rhs, nvars, T)
     # When the norm block is present, its positive diagonal scaling of the
     # full-rank nullspace bases makes A full column rank. Use the faster
     # direct least-squares solve, with SVD fallback for degenerate cases.
     a = -_least_squares_solve(A, b; rank_tol = rank_tol,
                               prefer_direct = use_direct_lsq)
-    tL = tL0 + ZL * a[1:nL]
-    tR = tR0 + ZR * a[(nL + 1):nvars]
-    return tL, tR
+    return t0 + Z * a
 end
 
 # ─────────────────────────────────────────────────────────────────────────────
