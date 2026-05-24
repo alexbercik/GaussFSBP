@@ -202,7 +202,15 @@ using LinearAlgebra
         fsbp = build_fsbp_operator(op_basis, quad_basis;
                                    principal=:upper,
                                    use_optimization=true,
-                                   compatibility_action=:error)
+                                   compatibility_action=:error,
+                                   test_functions=[x -> exp(x)],
+                                   test_derivatives=[x -> exp(x)],
+                                   test_weights=[2.0],
+                                   extrapolation_objective_weights=(accuracy=1//2, norm=1//2),
+                                   S_objective_weights=(accuracy=1//2, norm=1//2),
+                                   derivative_error_norm=:H,
+                                   opt_method=:sequential,
+                                   extrapolation_symmetry=:none)
 
         @test fsbp.nn == 2
         @test fsbp.tL == [1.0, 0.0]

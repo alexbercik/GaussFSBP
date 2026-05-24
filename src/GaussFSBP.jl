@@ -71,6 +71,8 @@ export quadbasis,
     orthogonalize_basis,
     check_ECT_system,
     check_T_system,
-    gauss_legendre
+    gauss_legendre,
+    legendre_functions,
+    legendre_basis
 
 end # module GaussFSBP

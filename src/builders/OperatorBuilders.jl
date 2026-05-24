@@ -1,22 +1,24 @@
 """
     OperatorBuilders.jl
 
-Construction routines for function-space SBP (FSBP) operators.
+High-level construction routines for one-dimensional diagonal-norm
+function-space SBP (FSBP) operators.
 
-Given an approximation basis F and a quadrature basis G, this module:
-1. Optionally orthogonalizes both bases via GeneralizedGauss.
-2. Constructs a quadrature rule from G via GeneralizedGauss.
-3. Builds the first-derivative FSBP operator D = H⁻¹Q.
-4. Constructs nodal extrapolation operators tL, tR.
-5. Packages everything into an `FSBPOperator` struct.
+The public entry point is [`build_fsbp_operator`](@ref).  It takes an
+approximation basis `op_basis` and a quadrature basis `quad_basis`, optionally
+orthogonalizes the quadrature basis, computes a GeneralizedGauss rule, and
+assembles the first-derivative operator `D = H⁻¹Q` together with the boundary
+extrapolation vectors `tL`, `tR`.
 
-Two construction paths are supported:
-- **nn == nb** (number of nodes equals number of basis functions):
-  the derivative operator is unique and computed via Vandermonde inversion.
-- **nn > nb** (more nodes than basis functions):
-  the system is underdetermined; a least-squares (minimum-norm) solution
-  is used by default.  An optimization-based path (Glaubitz et al. 2025)
-  can be selected via `use_optimization=true`.
+Two construction modes are available:
+- The default mode, `use_optimization=false`, builds exact or minimum-norm
+  extrapolation operators and then constructs the compatible SBP operator
+  directly.  If `nn == nb`, the derivative operator is unique; if `nn > nb`,
+  the skew-symmetric part is chosen by a minimum-norm solve.
+- The optimized mode, `use_optimization=true`, computes the same quadrature
+  rule but delegates the operator construction to [`optimize_fsbp_operator`](@ref).
+  Optimization-specific keywords are collected as `opt_kwargs...` by
+  `build_fsbp_operator` and forwarded to the optimized builder.
 """
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -81,104 +83,80 @@ end
                         use_optimization=false,
                         principal=:lower,
                         add_endpoint=nothing,
-                        verbose=false) -> FSBPOperator
+                        extrapolation_norm=:Hinv,
+                        rank_tol=nothing,
+                        verbose=false,
+                        opt_kwargs...) -> FSBPOperator
 
 Construct a first-derivative FSBP operator from an approximation basis
-`op_basis` (F) and a quadrature basis `quad_basis` (G).
+`op_basis` and a quadrature basis `quad_basis`.
 
-Both arguments should be `FunctionBasis` objects (with derivatives supplied).
-The quadrature basis G is typically the space (F²)' — the derivatives of
-products of pairs of functions from F.
+Both arguments must be `FunctionBasis` objects with matching interval element
+types.  The quadrature basis is typically the space `(F²)'`, the derivatives of
+products of pairs of approximation functions.
 
-# Keyword arguments
-- `orthogonalize::Bool=true` — orthogonalize both bases via
-  `GeneralizedGauss.orthogonalize_basis` before computing the quadrature.
-- `use_optimization::Bool=false` — if `true`, use the optimization-based
-  construction for the case where the quadrature nodes and weights are known.
-- `principal::Symbol=:lower` — which principal representation to use in
-  the Generalized Gauss continuation algorithm.  `:lower` yields
-  Gauss-Legendre-type (GL) rules; `:upper` yields Gauss-Lobatto-type
-  (GLL) rules (for even-length quadrature bases).
-- `add_endpoint::Union{Nothing,Symbol}=nothing` — which endpoint to anchor
-  during continuation: `:left` or `:right`.  When `nothing`, the default
-  pairing for the chosen `principal` is used (`:left` for `:lower`,
-  `:right` for `:upper`).
-- `verbose::Bool=false` — forward verbose diagnostic output to
-  `GeneralizedGauss.compute_gauss_rule`.
-- `extrapolation_norm::Symbol=:Hinv` — norm for the minimum-norm extrapolation
-  operators `tL`, `tR` (`:Hinv`, `:H`, `:Euclidean`, or `:Frobenius`).  Used in
-  both the exact and optimization-based construction paths.
-- `rank_tol` — tolerance for rank decisions in Vandermonde checks and in
-  optimization-based solves that use rank-truncated pseudoinverses.
+# Keyword Arguments
+- `orthogonalize::Bool=true` — orthogonalize the GeneralizedGauss quadrature
+  basis before computing the quadrature rule.
+- `use_optimization::Bool=false` — when `false`, use the direct exact/minimum-norm
+  construction in this file.  When `true`, compute the quadrature rule here and
+  forward the known nodes and weights to [`optimize_fsbp_operator`](@ref).
+- `principal::Symbol=:lower` — GeneralizedGauss principal representation.
+  For an even-length quadrature basis, `:lower` gives a GL-type rule and
+  `:upper` gives a GLL-type rule.
+- `add_endpoint::Union{Nothing,Symbol}=nothing` — optional endpoint anchor
+  passed to the quadrature continuation (`:left` or `:right`).
+- `extrapolation_norm::Symbol=:Hinv` — the weighted norm to use for tL, tR.
+  Allowed values are `:Hinv`, `:H`, `:Euclidean`.
+- `rank_tol=nothing` — tolerance for Vandermonde rank checks and, in the
+  optimized path, rank-truncated pseudoinverse/nullspace computations.
+- `verbose::Bool=false` — print quadrature and builder diagnostics; forwarded
+  to the optimized path when `use_optimization=true`.
+- `opt_kwargs...` — additional optimization keywords accepted only when
+  `use_optimization=true` and forwarded unchanged to
+  [`optimize_fsbp_operator`](@ref) (the quadrature basis is passed separately as
+  the required `quad_basis` argument).  This is where optimization controls such as
+  `test_functions`, `test_derivatives`, `test_weights`,
+  `extrapolation_objective_weights`, `S_objective_weights`,
+  `derivative_error_norm`, `zero_boundary_scaling`, `extrapolation_symmetry`,
+  `compatibility_action`, objective tolerances, `opt_method`, and simultaneous
+  solver/search options should be supplied.
 
-# Quadrature rule types (for an even-length quadrature basis of 2n functions)
-- `principal=:lower` → GL-type rule with **n** interior nodes (no endpoints).
-- `principal=:upper` → GLL-type rule with **n+1** nodes including both endpoints.
-
-For an odd-length basis of 2n+1 functions, both choices produce a Radau-type
-rule with n+1 nodes including one endpoint.
-
-To build a classical SBP operator on degree-p polynomials with p+1 GLL
-nodes, pass `principal=:upper` and a quadrature basis spanning degrees
-0 to 2p-1 (i.e., 2p functions).  Alternatively, keep `principal=:lower`
-but extend the quadrature basis by 2 extra functions (degrees 0 to 2p+1,
-i.e., 2(p+1) functions) to obtain a GL rule with p+1 interior nodes.
-
-# Precision
-
-The element type `T` is `eltype(op_basis)` (from the approximation-basis
-interval).  The quadrature rule must return nodes and weights of the same
-type.  Use matching `interval=(…)` on **both** `op_basis` and `quad_basis`
-(e.g. all `Float64` or all `BigFloat`); mismatched basis interval types throw
-an `ArgumentError`.
+# Quadrature Rules
+For an even-length quadrature basis of `2n` functions, `principal=:lower`
+produces a GL-type rule with `n` interior nodes, while `principal=:upper`
+produces a GLL-type rule with `n+1` nodes including both endpoints.  For an
+odd-length basis of `2n+1` functions, the rule is Radau-type and includes one
+endpoint.
 
 # Returns
-An `FSBPOperator{T}` struct containing D, H, Q, S, E, tL, tR, x, w, and
-references to the input bases.
+An `FSBPOperator{T}` containing `D`, `H`, `Q`, `S`, `E`, `tL`, `tR`, the nodes
+and weights, and references to the input bases.
 
-# Construction procedure
-1. Convert `quad_basis` to a GeneralizedGauss basis and (optionally)
-   orthogonalize it.
-2. Compute a generalized Gaussian quadrature rule (x, w) from the
-   quadrature basis via `compute_gauss_rule`.
-3. Build Vandermonde matrices V and Vₓ for `op_basis` at the nodes x, and
-   verify `V` has full column rank `nb` (linearly independent basis at nodes).
-4. Build extrapolation operators tL, tR (nodal or minimum-norm in `extrapolation_norm`)
-   satisfying Vᵀ t ≈ v at boundaries:
-   - If an endpoint is included in the quadrature nodes, use the corresponding
-     nodal evaluation vector.
-   - Otherwise if nn == nb: e = V⁻ᵀ t(xB).
-   - Otherwise if nn > nb: use the minimum-norm solution.
-5. Assemble the boundary matrix E = tR tRᵀ - tL tLᵀ.
-6. Construct the differentiation matrix D and weak-derivative matrix Q:
-   - If nn == nb: D = Vₓ / V  (unique solution), then verify Q + Qᵀ
-     matches the extrapolation boundary matrix E.
-   - If nn > nb: solve S V = H Vₓ - ½ E V for the minimum-norm
-     skew-symmetric S, then Q = S + E/2.
+# Direct Construction
+The non-optimized path builds `V`, `Vx`, `vL`, and `vR`; constructs nodal or
+minimum-norm extrapolation vectors satisfying `V' * tB = vB`; forms
+`E = tR*tR' - tL*tL'`; and then constructs `Q = S + E/2`.  If `nn == nb`, the
+derivative operator is unique.  If `nn > nb`, the skew-symmetric matrix `S` is
+chosen by the minimum-norm reduced solve.
 """
 function build_fsbp_operator(op_basis, quad_basis;
                               orthogonalize::Bool = true,
                               use_optimization::Bool = false,
                               principal::Symbol = :lower,
                               add_endpoint::Union{Nothing,Symbol} = nothing,
-                              test_functions = Function[],
-                              test_derivatives = Function[],
-                              test_weights = nothing,
-                              extrapolation_objective_weights = (accuracy = 1//2, norm = 1//2),
-                              S_objective_weights = (accuracy = 1//2, norm = 1//2),
                               extrapolation_norm::Symbol = :Hinv,
-                              derivative_error_norm::Symbol = :H,
-                              zero_boundary_scaling::Symbol = :fallback,
                               rank_tol = nothing,
-                              compatibility_tol = nothing,
-                              compatibility_action::Symbol = :warn,
-                              extrapolation_scale_tol = nothing,
-                              derivative_scale_tol = nothing,
-                              objective_tol = nothing,
-                              verbose::Bool = false)
+                              verbose::Bool = false,
+                              opt_kwargs...)
 
     op_basis isa FunctionBasis && quad_basis isa FunctionBasis ||
         throw(ArgumentError("build_fsbp_operator requires FunctionBasis for op_basis and quad_basis."))
+    if !use_optimization && !isempty(opt_kwargs)
+        names = join(string.(keys(opt_kwargs)), ", ")
+        throw(ArgumentError(
+            "optimization keyword(s) require use_optimization=true: $names"))
+    end
     _require_function_basis_intervals_match(op_basis, quad_basis, "build_fsbp_operator")
 
     # ── Extract interval ─────────────────────────────────────────────────
@@ -234,23 +212,11 @@ function build_fsbp_operator(op_basis, quad_basis;
 
     if use_optimization
         # ── Steps 3-6: Construct D, Q, S, E, tL, tR
-        return optimize_fsbp_operator(x, w, a, b, op_basis;
-                                      test_functions = test_functions,
-                                      test_derivatives = test_derivatives,
-                                      test_weights = test_weights,
-                                      extrapolation_objective_weights = extrapolation_objective_weights,
-                                      S_objective_weights = S_objective_weights,
+        return optimize_fsbp_operator(x, w, a, b, op_basis, quad_basis;
                                       extrapolation_norm = extrapolation_norm,
-                                      derivative_error_norm = derivative_error_norm,
-                                      zero_boundary_scaling = zero_boundary_scaling,
                                       rank_tol = rank_tol,
-                                      compatibility_tol = compatibility_tol,
-                                      compatibility_action = compatibility_action,
-                                      extrapolation_scale_tol = extrapolation_scale_tol,
-                                      derivative_scale_tol = derivative_scale_tol,
-                                      objective_tol = objective_tol,
                                       verbose = verbose,
-                                      quad_basis = quad_basis)
+                                      opt_kwargs...)
     end
 
     # -- use_optimization = false case ──────────────────────────────────────

@@ -67,18 +67,20 @@ println("Example 2: Polynomial Gauss-Legendre p=3 operator")
 println("=" ^ 70)
 
 p = 3
-funcs  = [let k=k; x -> x^k end for k in 0:p]
-derivs = [let k=k; k == 0 ? (x -> 0.0) : (x -> k * x^(k-1)) end for k in 0:p]
+#funcs  = [let k=k; x -> x^k end for k in 0:p]
+#derivs = [let k=k; k == 0 ? (x -> 0.0) : (x -> k * x^(k-1)) end for k in 0:p]
+funcs, derivs = legendre_functions(p+1, -1.0, 1.0)
 op_basis = FunctionBasis(funcs; derivs=derivs, interval=(-1.0, 1.0))
 
-qfuncs  = [let k=k; x -> x^k end for k in 0:(2p + 1)]
-qderivs = [let k=k; k == 0 ? (x -> 0.0) : (x -> k * x^(k-1)) end for k in 0:(2p + 1)]
+#qfuncs  = [let k=k; x -> x^k end for k in 0:(2p + 1)]
+#qderivs = [let k=k; k == 0 ? (x -> 0.0) : (x -> k * x^(k-1)) end for k in 0:(2p + 1)]
+qfuncs, qderivs = legendre_functions(2p+2, -1.0, 1.0)
 quad_basis = FunctionBasis(qfuncs; derivs=qderivs, interval=(-1.0, 1.0))
 
 println("Approximation basis: degree-$p monomials, $(nbasis(op_basis)) functions")
 println("Quadrature basis: $(nbasis(quad_basis)) functions")
 
-fsbp = build_fsbp_operator(op_basis, quad_basis; orthogonalize=true, principal=:lower)
+fsbp = build_fsbp_operator(op_basis, quad_basis; orthogonalize=false, principal=:lower, verbose=false)
 println("\nConstructed operator:")
 println(fsbp)
 
@@ -154,9 +156,9 @@ end
 # ═════════════════════════════════════════════════════════════════════════════
 import GeneralizedGauss: lobatto_lost_digits, principal_lost_digits, canonical_lost_digits
 # the following is needed because the basis is ill-conditioned
-lobatto_lost_digits(::Type{BigFloat}) = 10
-principal_lost_digits(::Type{BigFloat}) = 10
-canonical_lost_digits(::Type{BigFloat}) = 10
+lobatto_lost_digits(::Type{BigFloat}) = 12
+principal_lost_digits(::Type{BigFloat}) = 12
+canonical_lost_digits(::Type{BigFloat}) = 12
 
 println("=" ^ 70)
 println("Example 4: Exponential-GLL p=3+1 operator")
@@ -164,16 +166,18 @@ println("=" ^ 70)
 setprecision(BigFloat, 24; base=10) do
     ref = BigFloat(-1), BigFloat(1)
     p = 3
-    funcs_poly  = [let k=k; x -> x^k end for k in 0:p]
-    derivs_poly = [let k=k; k == 0 ? (x -> zero(x)) : (x -> k * x^(k-1)) end for k in 0:p]
+    #funcs_poly  = [let k=k; x -> x^k end for k in 0:p]
+    #derivs_poly = [let k=k; k == 0 ? (x -> zero(x)) : (x -> k * x^(k-1)) end for k in 0:p]
+    funcs_poly, derivs_poly = legendre_functions(p+1, ref)
     func_exp = exp
     deriv_exp = exp
     funcs = vcat(funcs_poly, func_exp)
     derivs = vcat(derivs_poly, deriv_exp)
     op_basis = FunctionBasis(funcs; derivs=derivs, interval=ref)
 
-    qfuncs_poly  = [let k=k; x -> x^k end for k in 0:(2p )]#- 1)]
-    qderivs_poly = [let k=k; k == 0 ? (x -> zero(x)) : (x -> k * x^(k-1)) end for k in 0:(2p )]#- 1)]
+    #qfuncs_poly  = [let k=k; x -> x^k end for k in 0:(2p )]#- 1)]
+    #qderivs_poly = [let k=k; k == 0 ? (x -> zero(x)) : (x -> k * x^(k-1)) end for k in 0:(2p )]#- 1)]
+    qfuncs_poly, qderivs_poly = legendre_functions(2p+1, ref)
     qfuncs_exp = [x -> x^i * exp(x) for i in 0:p]
     qderivs_exp = vcat(exp,
                     [x -> (i * x^(i - 1) + x^i) * exp(x) for i in 1:p])
@@ -192,8 +196,9 @@ setprecision(BigFloat, 24; base=10) do
     extrap_weights = (accuracy = 1//2, norm = 1//2)
     S_weights = (accuracy = 1//2, norm = 1//2)
 
-    fsbp = build_fsbp_operator(op_basis, quad_basis; orthogonalize=true, 
-        principal=:upper, use_optimization=true, add_endpoint=:left,
+    fsbp = build_fsbp_operator(op_basis, quad_basis; orthogonalize=true, add_endpoint=:left,
+        principal=:lower, use_optimization=true, opt_method=:simultaneous,
+        simultaneous_num_starts=30,
         verbose=true, test_functions=opt_funcs, test_derivatives=opt_derivs, test_weights=test_weights,
         extrapolation_objective_weights=extrap_weights, S_objective_weights=S_weights)
     println("\nConstructed operator:")
