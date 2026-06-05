@@ -42,6 +42,9 @@ include("builders/OptimizedOperatorBuilders.jl")
 # ── Verification (operator — depends on FSBPOperator from builders) ─────────
 include("verification/OperatorVerification.jl")
 
+# ── I/O ──────────────────────────────────────────────────────────────────────
+include("io/FSBPOperatorPythonExport.jl")
+
 # ── Exports ──────────────────────────────────────────────────────────────────
 # Basis interface
 export AbstractBasis
@@ -59,6 +62,7 @@ export check_fsbp_operator, FSBPOperatorReport
 # Operator construction
 export FSBPOperator
 export build_fsbp_operator, optimize_fsbp_operator
+export print_fsbp_operator_python
 
 # Reference integrals
 export reference_integral_gausslegendre
