@@ -135,8 +135,9 @@ setprecision(BigFloat, 20; base=10) do
     println("Approximation basis: degree-$p monomials + e^x, $(nbasis(op_basis)) functions")
     println("Quadrature basis: $(nbasis(quad_basis)) functions")
 
-    fsbp = build_fsbp_operator(op_basis, quad_basis; orthogonalize=true, 
-        principal=:lower, use_optimization=false, add_endpoint=:left, verbose=:false)
+    fsbp = build_fsbp_operator(op_basis, quad_basis; orthogonalize=true,
+        principal=:lower, use_optimization=false, verbose=:false,
+        quad_kwargs=(add_endpoint=:left,))
     println("\nConstructed operator:")
     println(fsbp)
 
@@ -160,7 +161,7 @@ end
 # ═════════════════════════════════════════════════════════════════════════════
 # This ill-conditioned basis needs a per-call lost-digit allowance in the
 # GeneralizedGauss nonlinear solves.
-quad_kwargs = (lost_digits = 12,)
+quad_kwargs = (lost_digits = 12, add_endpoint = :left)
 
 println("=" ^ 70)
 println("Example 4: Exponential-GLL p=3+1 operator")
@@ -198,7 +199,7 @@ setprecision(BigFloat, 24; base=10) do
     extrap_weights = (accuracy = 1//2, norm = 1//2)
     S_weights = (accuracy = 1//2, norm = 1//2)
 
-    fsbp = build_fsbp_operator(op_basis, quad_basis; orthogonalize=true, add_endpoint=:left,
+    fsbp = build_fsbp_operator(op_basis, quad_basis; orthogonalize=true,
         principal=:lower, use_optimization=true, opt_method=:simultaneous,
         quad_kwargs=quad_kwargs,
         simultaneous_num_starts=30,
