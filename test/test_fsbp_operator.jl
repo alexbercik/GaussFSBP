@@ -275,4 +275,35 @@ using LinearAlgebra
         @test all(fsbp.w .> 0)
     end
 
+    @testset "Quadrature kwargs are forwarded" begin
+        funcs  = [x -> 1.0, x -> x]
+        derivs = [x -> 0.0, x -> 1.0]
+        op_basis = FunctionBasis(funcs; derivs=derivs)
+
+        qfuncs  = [x -> 1.0, x -> x]
+        qderivs = [x -> 0.0, x -> 1.0]
+        quad_basis = FunctionBasis(qfuncs; derivs=qderivs)
+
+        # These keywords are consumed by GeneralizedGauss.compute_gauss_rule,
+        # not by the FSBP builder itself.
+        fsbp = build_fsbp_operator(op_basis, quad_basis;
+                                   principal=:upper,
+                                   quad_kwargs=(lost_digits=3,
+                                                add_endpoint=:right,
+                                                solver_tolerance=1e-12,
+                                                intermediate_tolerance=1e-9))
+
+        @test fsbp.nn == 2
+        @test all(fsbp.w .> 0)
+
+        @test_throws ArgumentError build_fsbp_operator(op_basis, quad_basis;
+                                                       principal=:upper,
+                                                       quad_kwargs=(solver_tolerance=-1.0,))
+        @test_throws ArgumentError build_fsbp_operator(op_basis, quad_basis;
+                                                       quad_kwargs=(principal=:upper,))
+        @test_throws ArgumentError build_fsbp_operator(op_basis, quad_basis;
+                                                       add_endpoint=:right,
+                                                       quad_kwargs=(add_endpoint=:left,))
+    end
+
 end

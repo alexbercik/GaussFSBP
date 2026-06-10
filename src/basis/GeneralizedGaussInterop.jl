@@ -27,9 +27,6 @@ GeneralizedGauss.compute_moments(basis::FunctionBasis; measure=nothing) =
 GeneralizedGauss.compute_gauss_rule(basis::FunctionBasis, moments=nothing; kwargs...) =
     GeneralizedGauss.compute_gauss_rule(_to_gg_basis(basis), moments; kwargs...)
 
-GeneralizedGauss.compute_gauss_rules(basis::FunctionBasis, moments=nothing; kwargs...) =
-    GeneralizedGauss.compute_gauss_rules(_to_gg_basis(basis), moments; kwargs...)
-
 GeneralizedGauss.orthogonalize_basis(basis::FunctionBasis; measure=nothing, quad_order=nothing) =
     GeneralizedGauss.orthogonalize_basis(_to_gg_basis(basis); measure=measure, quad_order=quad_order)
 

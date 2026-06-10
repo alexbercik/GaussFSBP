@@ -55,6 +55,8 @@ report = check_fsbp_operator(fsbp; atol=1e-10, rtol=1e-10)
 println("\nVerification:")
 println(report)
 
+print_fsbp_operator_python(fsbp; num_digits=16)
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Example 2: Polynomial basis — degree 3
@@ -95,6 +97,8 @@ println()
 report = check_fsbp_operator(fsbp; atol=1e-10, rtol=1e-10)
 println("\nVerification:")
 println(report)
+
+#exit()
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -154,11 +158,9 @@ end
 #   F = {1, x, x², x³, e^x}                  (nb = 5)
 #   G = {1, x, x², x³, x⁴, x⁵, e^x, xe^x, x²e^x, x³e^x, e^2x, x⁶}  (12 functions → GLL → 6 nodes)
 # ═════════════════════════════════════════════════════════════════════════════
-import GeneralizedGauss: lobatto_lost_digits, principal_lost_digits, canonical_lost_digits
-# the following is needed because the basis is ill-conditioned
-lobatto_lost_digits(::Type{BigFloat}) = 12
-principal_lost_digits(::Type{BigFloat}) = 12
-canonical_lost_digits(::Type{BigFloat}) = 12
+# This ill-conditioned basis needs a per-call lost-digit allowance in the
+# GeneralizedGauss nonlinear solves.
+quad_kwargs = (lost_digits = 12,)
 
 println("=" ^ 70)
 println("Example 4: Exponential-GLL p=3+1 operator")
@@ -198,6 +200,7 @@ setprecision(BigFloat, 24; base=10) do
 
     fsbp = build_fsbp_operator(op_basis, quad_basis; orthogonalize=true, add_endpoint=:left,
         principal=:lower, use_optimization=true, opt_method=:simultaneous,
+        quad_kwargs=quad_kwargs,
         simultaneous_num_starts=30,
         verbose=true, test_functions=opt_funcs, test_derivatives=opt_derivs, test_weights=test_weights,
         extrapolation_objective_weights=extrap_weights, S_objective_weights=S_weights)

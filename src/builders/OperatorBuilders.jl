@@ -82,9 +82,9 @@ end
                         orthogonalize=true,
                         use_optimization=false,
                         principal=:lower,
-                        add_endpoint=nothing,
                         extrapolation_norm=:Hinv,
                         rank_tol=nothing,
+                        quad_kwargs=NamedTuple(),
                         verbose=false,
                         opt_kwargs...) -> FSBPOperator
 
@@ -104,12 +104,17 @@ products of pairs of approximation functions.
 - `principal::Symbol=:lower` — GeneralizedGauss principal representation.
   For an even-length quadrature basis, `:lower` gives a GL-type rule and
   `:upper` gives a GLL-type rule.
-- `add_endpoint::Union{Nothing,Symbol}=nothing` — optional endpoint anchor
-  passed to the quadrature continuation (`:left` or `:right`).
 - `extrapolation_norm::Symbol=:Hinv` — the weighted norm to use for tL, tR.
   Allowed values are `:Hinv`, `:H`, `:Euclidean`.
 - `rank_tol=nothing` — tolerance for Vandermonde rank checks and, in the
   optimized path, rank-truncated pseudoinverse/nullspace computations.
+- `quad_kwargs=NamedTuple()` — additional keywords forwarded to
+  `GeneralizedGauss.compute_gauss_rule`, such as `lost_digits`,
+  `add_endpoint`, `solver_tolerance`, `intermediate_tolerance`,
+  `differentiable`, `measure`, and nonlinear solver options.  When
+  `orthogonalize=true`, `measure` is also used for the GeneralizedGauss
+  orthogonalization.  `principal` and `verbose` remain top-level
+  `build_fsbp_operator` keywords.
 - `verbose::Bool=false` — print quadrature and builder diagnostics; forwarded
   to the optimized path when `use_optimization=true`.
 - `opt_kwargs...` — additional optimization keywords accepted only when
@@ -144,14 +149,19 @@ function build_fsbp_operator(op_basis, quad_basis;
                               orthogonalize::Bool = true,
                               use_optimization::Bool = false,
                               principal::Symbol = :lower,
-                              add_endpoint::Union{Nothing,Symbol} = nothing,
                               extrapolation_norm::Symbol = :Hinv,
                               rank_tol = nothing,
+                              quad_kwargs::NamedTuple = NamedTuple(),
                               verbose::Bool = false,
                               opt_kwargs...)
 
     op_basis isa FunctionBasis && quad_basis isa FunctionBasis ||
         throw(ArgumentError("build_fsbp_operator requires FunctionBasis for op_basis and quad_basis."))
+    if :add_endpoint in keys(opt_kwargs)
+        throw(ArgumentError(
+            "add_endpoint is a quadrature keyword. Pass it as " *
+            "quad_kwargs=(add_endpoint=...,), not as a top-level keyword."))
+    end
     if !use_optimization && !isempty(opt_kwargs)
         names = join(string.(keys(opt_kwargs)), ", ")
         throw(ArgumentError(
@@ -171,26 +181,37 @@ function build_fsbp_operator(op_basis, quad_basis;
         "op_basis interval type ($T)."))
     _validate_norm_symbol(extrapolation_norm, (:Hinv, :H, :Euclidean, :Frobenius),
                           "extrapolation_norm")
+    reserved_quad_keys = (:principal, :verbose)
+    conflicting_quad_keys = [key for key in keys(quad_kwargs) if key in reserved_quad_keys]
+    if !isempty(conflicting_quad_keys)
+        names = join(string.(conflicting_quad_keys), ", ")
+        throw(ArgumentError(
+            "quad_kwargs must not contain top-level quadrature keyword(s): $names"))
+    end
 
     # ── Step 1: Build GeneralizedGauss basis for the quadrature basis ────
-    gg_quad_basis = _to_gg_basis(quad_basis; require_derivs=true)
+    # GeneralizedGauss can use analytic derivatives, finite differences, or
+    # derivative-free MADS depending on its `differentiable` keyword, so the
+    # quadrature basis itself does not need analytic derivatives here.
+    gg_quad_basis = _to_gg_basis(quad_basis)
 
     if orthogonalize
-        gg_quad_basis, _ = GeneralizedGauss.orthogonalize_basis(gg_quad_basis)
+        # Weighted quadrature should orthogonalize with the same measure used
+        # later for moment computation.
+        orth_measure = haskey(quad_kwargs, :measure) ? quad_kwargs.measure : nothing
+        gg_quad_basis, _ = GeneralizedGauss.orthogonalize_basis(gg_quad_basis;
+                                                                measure=orth_measure)
     end
 
     # ── Step 2: Compute quadrature rule ──────────────────────────────────
-    # Pass principal and add_endpoint to control the rule type:
+    # Pass principal and optional quad_kwargs.add_endpoint to control the rule type:
     #   principal=:upper → GLL (both endpoints, n+1 nodes for 2n basis)
     #   principal=:lower → GL  (no endpoints, n nodes for 2n basis)
     #   principal=:right → Right-Radau (right endpoint, n+1 nodes for 2n+1 basis)
     #   principal=:left → Left-Radau (right endpoint, n+1 nodes for 2n+1 basis)
-    w, x = if add_endpoint === nothing
-        GeneralizedGauss.compute_gauss_rule(gg_quad_basis; principal, verbose)
-    else
-        GeneralizedGauss.compute_gauss_rule(gg_quad_basis;
-                                            principal, verbose, add_endpoint)
-    end
+    w, x = GeneralizedGauss.compute_gauss_rule(gg_quad_basis;
+                                               principal, verbose,
+                                               quad_kwargs...)
     x = collect(x)
     w = collect(w)
     _require_uniform_type("build_fsbp_operator quadrature", [
