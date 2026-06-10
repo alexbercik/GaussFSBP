@@ -40,8 +40,22 @@ fsbp.nb         # number of approximation basis functions
 
 ## Setup
 
-GaussFSBP depends on the local unregistered package `GeneralizedGauss.jl`,
-stored in `lib/GeneralizedGauss.jl/`.
+GaussFSBP depends on the local unregistered quadrature package
+`GeneralizedGauss.jl`.  Currently, `Project.toml` points to:
+
+```text
+lib/GeneralizedGauss.jl
+```
+
+That path must contain the `GeneralizedGauss.jl` repository, either as an
+actual directory or as a symlink:
+
+```bash
+ln -s /path/to/GeneralizedGauss.jl lib/GeneralizedGauss.jl
+```
+
+If you want to keep the quadrature repository somewhere else, update the
+`[sources]` entry in `Project.toml` to point to that location.
 
 For Julia 1.11 and newer, the `[sources]` section in `Project.toml` resolves
 the local package automatically:
