@@ -19,18 +19,23 @@ The main entry point is:
 build_fsbp_operator(op_basis, quad_basis; kwargs...)
 ```
 
-The returned object stores:
+The returned `FSBPOperator` object stores:
 
 ```julia
-fsbp.x    # quadrature nodes
-fsbp.w    # quadrature weights
-fsbp.H    # diagonal norm matrix
-fsbp.D    # differentiation matrix
-fsbp.Q    # weak derivative matrix, Q = H * D
-fsbp.S    # skew-symmetric part of Q
-fsbp.E    # boundary matrix
-fsbp.tL   # left boundary extrapolation vector
-fsbp.tR   # right boundary extrapolation vector
+fsbp.D          # differentiation matrix
+fsbp.H          # diagonal norm / mass matrix
+fsbp.Q          # weak derivative matrix, Q = H * D
+fsbp.S          # skew-symmetric part, S = Q - E / 2
+fsbp.E          # boundary matrix, E = tR * tR' - tL * tL'
+fsbp.tL         # left boundary extrapolation vector
+fsbp.tR         # right boundary extrapolation vector
+fsbp.x          # quadrature nodes
+fsbp.w          # quadrature weights
+fsbp.op_basis   # approximation basis used to build D
+fsbp.quad_basis # quadrature exactness basis used to compute x and w
+fsbp.interval   # reference interval, stored as (a, b)
+fsbp.nn         # number of quadrature nodes
+fsbp.nb         # number of approximation basis functions
 ```
 
 ## Setup
