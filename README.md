@@ -316,6 +316,7 @@ build_fsbp_operator(op_basis, quad_basis;
                     principal=:lower,
                     extrapolation_norm=:Hinv,
                     rank_tol=nothing,
+                    quad_moments=nothing,
                     quad_kwargs=NamedTuple(),
                     verbose=false,
                     opt_kwargs...)
@@ -335,6 +336,11 @@ build_fsbp_operator(op_basis, quad_basis;
   `:Euclidean`.
 - `rank_tol=nothing`: Tolerance for rank checks and pseudoinverses.  Leave as
   `nothing` unless a basis is nearly rank deficient.
+- `quad_moments=nothing`: Optional exact moments of the original
+  `quad_basis`, in the same order as its functions.  Use this whenever stable
+  analytic or problem-specific moments are available.  If
+  `orthogonalize=true`, the builder transforms these moments internally before
+  calling GeneralizedGauss.
 - `verbose=false`: Print quadrature and construction diagnostics.
 
 ### Quadrature Keywords
@@ -366,7 +372,8 @@ Useful `quad_kwargs` entries:
 - `max_adaptive_steps`: maximum number of continuation retries.
 
 Do not put `principal` or `verbose` inside `quad_kwargs`; those are top-level
-`build_fsbp_operator` keywords.
+`build_fsbp_operator` keywords.  Also do not put moments inside `quad_kwargs`;
+pass them with top-level `quad_moments`.
 
 ### Optimization Keywords
 

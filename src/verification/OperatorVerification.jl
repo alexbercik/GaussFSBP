@@ -56,7 +56,8 @@ end
     check_fsbp_operator(op::FSBPOperator;
                         atol=nothing, rtol=nothing,
                         rank_tol=nothing,
-                        max_ref_order=4096) -> FSBPOperatorReport
+                        max_ref_order=4096,
+                        quad_moments=nothing) -> FSBPOperatorReport
 
 Run a comprehensive verification suite on the FSBP operator `op`.
 
@@ -70,6 +71,9 @@ the current precision setting).
 - `rank_tol` — tolerance for singular value ratio in rank check.
 - `max_ref_order` — maximum Gauss-Legendre order for reference integrals
   in the quadrature exactness check.
+- `quad_moments` — optional exact moments of `op.quad_basis`.  When supplied,
+  the quadrature check uses these values directly instead of computing
+  numerical reference integrals.
 
 # Returns
 An `FSBPOperatorReport` summarising all check outcomes.
@@ -78,7 +82,8 @@ function check_fsbp_operator(op::FSBPOperator{T};
                               atol = nothing,
                               rtol = nothing,
                               rank_tol = nothing,
-                              max_ref_order::Int = 4096) where T
+                              max_ref_order::Int = 4096,
+                              quad_moments = nothing) where T
     # Default tolerances: ~100 * machine epsilon
     _atol = atol !== nothing ? T(atol) : T(100) * eps(T)
     _rtol = rtol !== nothing ? T(rtol) : T(100) * eps(T)
@@ -90,7 +95,8 @@ function check_fsbp_operator(op::FSBPOperator{T};
     checks["Derivative exactness"] = _check_derivative_exactness(op, _atol, _rtol)
 
     # 2. Quadrature exactness
-    checks["Quadrature exactness"] = _check_quadrature_exactness(op, _atol, _rtol, max_ref_order)
+    checks["Quadrature exactness"] =
+        _check_quadrature_exactness(op, _atol, _rtol, max_ref_order, quad_moments)
 
     # 3. SBP property: Q + Qᵀ ≈ E
     checks["SBP property"] = _check_sbp_property(op, _atol)
@@ -156,7 +162,37 @@ end
 """
 Check 2: Quadrature exactness — reuse existing check_quadrature_exactness.
 """
-function _check_quadrature_exactness(op::FSBPOperator{T}, atol, rtol, max_ref_order) where T
+function _check_quadrature_exactness(op::FSBPOperator{T}, atol, rtol, max_ref_order,
+                                     quad_moments = nothing) where T
+    if quad_moments !== nothing
+        raw_quad_moments = collect(quad_moments)
+        raw_quad_moments isa AbstractVector || throw(ArgumentError(
+            "quad_moments must be a vector-like collection with one moment " *
+            "per quadrature basis function."))
+        length(raw_quad_moments) == nbasis(op.quad_basis) || throw(ArgumentError(
+            "quad_moments has length $(length(raw_quad_moments)), expected " *
+            "$(nbasis(op.quad_basis)) for op.quad_basis."))
+
+        refs = T.(raw_quad_moments)
+        funcs = basis_functions(op.quad_basis)
+        errors = Vector{T}(undef, length(funcs))
+        for (k, g) in enumerate(funcs)
+            candidate = sum(op.w[i] * g(op.x[i]) for i in eachindex(op.x))
+            errors[k] = abs(T(candidate) - refs[k])
+        end
+
+        max_err = maximum(errors)
+        n_failed = count(k -> errors[k] > atol + rtol * abs(refs[k]),
+                         1:length(errors))
+        passed = n_failed == 0
+        detail = if passed
+            "max error = $(Printf.@sprintf("%.2e", Float64(max_err))) (all $(length(errors)) exact)"
+        else
+            "max error = $(Printf.@sprintf("%.2e", Float64(max_err))) ($n_failed/$(length(errors)) failed)"
+        end
+        return (passed=passed, error=max_err, detail=detail)
+    end
+
     report = check_quadrature_exactness(op.quad_basis, op.x, op.w;
                                         interval=op.interval,
                                         atol=atol, rtol=rtol,

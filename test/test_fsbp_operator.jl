@@ -306,4 +306,44 @@ using LinearAlgebra
                                                        quad_kwargs=(add_endpoint=:left,))
     end
 
+    @testset "Explicit quadrature moments" begin
+        funcs  = [x -> 1.0, x -> x]
+        derivs = [x -> 0.0, x -> 1.0]
+        op_basis = FunctionBasis(funcs; derivs=derivs)
+
+        qfuncs  = [let k=k; x -> x^k end for k in 0:3]
+        qderivs = [let k=k; k == 0 ? (x -> 0.0) : (x -> k * x^(k-1)) end for k in 0:3]
+        quad_basis = FunctionBasis(qfuncs; derivs=qderivs)
+        quad_moments = [2.0, 0.0, 2.0 / 3.0, 0.0]
+
+        # The supplied moments are for the original quadrature basis.  The
+        # builder must transform them internally when orthogonalization is on.
+        fsbp_orth = build_fsbp_operator(op_basis, quad_basis;
+                                        orthogonalize=true,
+                                        principal=:lower,
+                                        quad_moments=quad_moments)
+        fsbp_raw = build_fsbp_operator(op_basis, quad_basis;
+                                       orthogonalize=false,
+                                       principal=:lower,
+                                       quad_moments=quad_moments)
+
+        @test fsbp_orth.nn == fsbp_raw.nn == 2
+        @test fsbp_orth.x ≈ fsbp_raw.x
+        @test fsbp_orth.w ≈ fsbp_raw.w
+
+        report = check_fsbp_operator(fsbp_orth; atol=1e-10, rtol=1e-10,
+                                     quad_moments=quad_moments)
+        @test report.checks["Quadrature exactness"].passed
+        @test report.checks["SBP property"].passed
+        @test_throws ArgumentError check_fsbp_operator(fsbp_orth;
+                                                       quad_moments=[2.0])
+
+        @test_throws ArgumentError build_fsbp_operator(op_basis, quad_basis;
+                                                       principal=:lower,
+                                                       quad_moments=[2.0, 0.0])
+        @test_throws ArgumentError build_fsbp_operator(op_basis, quad_basis;
+                                                       principal=:lower,
+                                                       quad_kwargs=(moments=quad_moments,))
+    end
+
 end

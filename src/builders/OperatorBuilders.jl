@@ -84,6 +84,7 @@ end
                         principal=:lower,
                         extrapolation_norm=:Hinv,
                         rank_tol=nothing,
+                        quad_moments=nothing,
                         quad_kwargs=NamedTuple(),
                         verbose=false,
                         opt_kwargs...) -> FSBPOperator
@@ -108,6 +109,11 @@ products of pairs of approximation functions.
   Allowed values are `:Hinv`, `:H`, `:Euclidean`.
 - `rank_tol=nothing` — tolerance for Vandermonde rank checks and, in the
   optimized path, rank-truncated pseudoinverse/nullspace computations.
+- `quad_moments=nothing` — optional exact moments of the original `quad_basis`
+  in its original order.  When supplied, these moments are passed to
+  `GeneralizedGauss.compute_gauss_rule` instead of being computed numerically.
+  If `orthogonalize=true`, the builder applies the same change of basis to the
+  moments before solving the quadrature rule.
 - `quad_kwargs=NamedTuple()` — additional keywords forwarded to
   `GeneralizedGauss.compute_gauss_rule`, such as `lost_digits`,
   `add_endpoint`, `solver_tolerance`, `intermediate_tolerance`,
@@ -152,6 +158,7 @@ function build_fsbp_operator(op_basis, quad_basis;
                               principal::Symbol = :lower,
                               extrapolation_norm::Symbol = :Hinv,
                               rank_tol = nothing,
+                              quad_moments = nothing,
                               quad_kwargs::NamedTuple = NamedTuple(),
                               verbose::Bool = false,
                               opt_kwargs...)
@@ -177,12 +184,13 @@ function build_fsbp_operator(op_basis, quad_basis;
         "op_basis interval type ($T)."))
     _validate_norm_symbol(extrapolation_norm, (:Hinv, :H, :Euclidean, :Frobenius),
                           "extrapolation_norm")
-    reserved_quad_keys = (:principal, :verbose)
+    reserved_quad_keys = (:principal, :verbose, :moments)
     conflicting_quad_keys = [key for key in keys(quad_kwargs) if key in reserved_quad_keys]
     if !isempty(conflicting_quad_keys)
         names = join(string.(conflicting_quad_keys), ", ")
         throw(ArgumentError(
-            "quad_kwargs must not contain top-level quadrature keyword(s): $names"))
+            "quad_kwargs must not contain top-level quadrature keyword(s): $names. " *
+            "Pass explicit moments with the top-level quad_moments keyword."))
     end
 
     # ── Step 1: Build GeneralizedGauss basis for the quadrature basis ────
@@ -190,13 +198,30 @@ function build_fsbp_operator(op_basis, quad_basis;
     # derivative-free MADS depending on its `differentiable` keyword, so the
     # quadrature basis itself does not need analytic derivatives here.
     gg_quad_basis = _to_gg_basis(quad_basis)
+    gg_moments = nothing
+    if quad_moments !== nothing
+        raw_quad_moments = collect(quad_moments)
+        raw_quad_moments isa AbstractVector || throw(ArgumentError(
+            "quad_moments must be a vector-like collection with one moment " *
+            "per quadrature basis function."))
+        length(raw_quad_moments) == nbasis(quad_basis) || throw(ArgumentError(
+            "quad_moments has length $(length(raw_quad_moments)), expected " *
+            "$(nbasis(quad_basis)) for the supplied quad_basis."))
+        gg_moments = T.(raw_quad_moments)
+    end
 
     if orthogonalize
         # Weighted quadrature should orthogonalize with the same measure used
         # later for moment computation.
         orth_measure = haskey(quad_kwargs, :measure) ? quad_kwargs.measure : nothing
-        gg_quad_basis, _ = GeneralizedGauss.orthogonalize_basis(gg_quad_basis;
-                                                                measure=orth_measure)
+        gg_quad_basis, moment_transform =
+            GeneralizedGauss.orthogonalize_basis(gg_quad_basis;
+                                                 measure=orth_measure)
+        if gg_moments !== nothing
+            # orthogonalize_basis returns ψ = T φ, so the moment vector must
+            # be transformed by the same matrix before the quadrature solve.
+            gg_moments = Vector{T}(Matrix{T}(moment_transform) * gg_moments)
+        end
     end
 
     # ── Step 2: Compute quadrature rule ──────────────────────────────────
@@ -205,9 +230,15 @@ function build_fsbp_operator(op_basis, quad_basis;
     #   principal=:lower → GL  (no endpoints, n nodes for 2n basis)
     #   principal=:right → Right-Radau (right endpoint, n+1 nodes for 2n+1 basis)
     #   principal=:left → Left-Radau (right endpoint, n+1 nodes for 2n+1 basis)
-    w, x = GeneralizedGauss.compute_gauss_rule(gg_quad_basis;
-                                               principal, verbose,
-                                               quad_kwargs...)
+    if gg_moments === nothing
+        w, x = GeneralizedGauss.compute_gauss_rule(gg_quad_basis;
+                                                   principal, verbose,
+                                                   quad_kwargs...)
+    else
+        w, x = GeneralizedGauss.compute_gauss_rule(gg_quad_basis, gg_moments;
+                                                   principal, verbose,
+                                                   quad_kwargs...)
+    end
     x = collect(x)
     w = collect(w)
     _require_uniform_type("build_fsbp_operator quadrature", [
