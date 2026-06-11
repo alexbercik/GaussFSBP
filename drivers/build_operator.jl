@@ -4,10 +4,9 @@
 Driver demonstrating end-to-end construction and verification of FSBP
 operators using `build_fsbp_operator` and `check_fsbp_operator`.
 
-Three examples are shown:
-1. Polynomial basis (degree 3 monomials) — recovers a classical SBP operator.
-2. Polynomial basis (degree 1) — minimal case.
-3. Polynomial basis with nn > nb — exercises the least-squares path.
+Several examples are shown, including polynomial, square-root, and exponential
+bases.  The square-root example demonstrates passing explicit quadrature
+moments for endpoint-singular functions.
 
 Usage:
     julia --project=. drivers/build_operator_driver.jl
@@ -98,17 +97,105 @@ report = check_fsbp_operator(fsbp; atol=1e-10, rtol=1e-10)
 println("\nVerification:")
 println(report)
 
-#exit()
-
 
 # ═════════════════════════════════════════════════════════════════════════════
-# Example 3: Exponential basis (no optimization) — degree 2+1
-#   F = {1, x, x², e^x}                  (nb = 4)
-#   G = {1, x, x², x³, e^x, xe^x, x²e^x, e^2x}  (8 functions → GL → 4 nodes)
+# Example 3: Square-root basis with endpoint-singular quadrature moments
+#   F = {1, sqrt(1-x), x, x²}
+#   G = {1, x, x², x³, 1/sqrt(1-x), x/sqrt(1-x), x²/sqrt(1-x)}
+#   The singular q-basis moments are supplied explicitly to avoid adaptive
+#   reference-integration error near x = 1.
 # ═════════════════════════════════════════════════════════════════════════════
 
 println("=" ^ 70)
-println("Example 3: Exponential-GL p=2+1 operator")
+println("Example 3: Square-root basis with explicit moments")
+println("=" ^ 70)
+
+sqrt_quad_kwargs = (lost_digits = 5, add_endpoint = :left)
+
+setprecision(BigFloat, 32; base=10) do
+    ref = BigFloat(-1), BigFloat(1)
+
+    funcs = [
+        x -> BigFloat(1),
+        x -> sqrt(BigFloat(1) - x),
+        x -> x,
+        x -> x^2,
+    ]
+    derivs = [
+        x -> BigFloat(0),
+        x -> -BigFloat(1) / (BigFloat(2) * sqrt(BigFloat(1) - x)),
+        x -> BigFloat(1),
+        x -> BigFloat(2) * x,
+    ]
+    op_basis = FunctionBasis(funcs; derivs=derivs, interval=ref)
+
+    qfuncs = [
+        x -> BigFloat(1),
+        x -> x,
+        x -> x^2,
+        x -> x^3,
+        x -> BigFloat(1) / sqrt(BigFloat(1) - x),
+        x -> x / sqrt(BigFloat(1) - x),
+        x -> x^2 / sqrt(BigFloat(1) - x),
+    ]
+    qderivs = [
+        x -> BigFloat(0),
+        x -> BigFloat(1),
+        x -> BigFloat(2) * x,
+        x -> BigFloat(3) * x^2,
+        x -> BigFloat(1) / (BigFloat(2) * (BigFloat(1) - x) *
+                            sqrt(BigFloat(1) - x)),
+        x -> (BigFloat(2) - x) /
+             (BigFloat(2) * (BigFloat(1) - x) * sqrt(BigFloat(1) - x)),
+        x -> x * (BigFloat(4) - BigFloat(3) * x) /
+             (BigFloat(2) * (BigFloat(1) - x) * sqrt(BigFloat(1) - x)),
+    ]
+    quad_basis = FunctionBasis(qfuncs; derivs=qderivs, interval=ref)
+
+    # Exact moments for the q-basis above, in qfuncs order.
+    quad_moments = BigFloat[
+        2,
+        0,
+        BigFloat(2) / 3,
+        0,
+        2 * sqrt(BigFloat(2)),
+        2 * sqrt(BigFloat(2)) / 3,
+        14 * sqrt(BigFloat(2)) / 15,
+    ]
+
+    println("Approximation basis: square-root basis, $(nbasis(op_basis)) functions")
+    println("Quadrature basis: $(nbasis(quad_basis)) functions")
+
+    fsbp = build_fsbp_operator(op_basis, quad_basis; orthogonalize=true,
+        principal=:lower, use_optimization=false, verbose=false,
+        quad_moments=quad_moments,
+        quad_kwargs=sqrt_quad_kwargs)
+    println("\nConstructed operator:")
+    println(fsbp)
+
+    println("\nNodes:   $(fsbp.x)")
+    println("Weights: $(fsbp.w)")
+    println("\nD = ")
+    display(round.(fsbp.D; digits=6))
+    println("\ntL = ")
+    display(round.(fsbp.tL'; digits=6))
+    println()
+
+    report = check_fsbp_operator(fsbp; atol=1e-10, rtol=1e-10,
+                                 quad_moments=quad_moments)
+    println("\nVerification:")
+    println(report)
+
+    print_fsbp_operator_python(fsbp; num_digits=16)
+end
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Example 4: Exponential basis (no optimization) — degree 2+1
+#   F = {1, x, x², e^x}                  (nb = 4)
+#   G = {1, x, x², x³, e^x, xe^x, x²e^x, e^2x}  (8 functions → GL → 4 nodes)
+# ═════════════════════════════════════════════════════════════════════════════
+println("=" ^ 70)
+println("Example 4: Exponential-GL p=2+1 operator")
 println("=" ^ 70)
 setprecision(BigFloat, 20; base=10) do
     ref = BigFloat(-1), BigFloat(1)
@@ -136,8 +223,8 @@ setprecision(BigFloat, 20; base=10) do
     println("Quadrature basis: $(nbasis(quad_basis)) functions")
 
     fsbp = build_fsbp_operator(op_basis, quad_basis; orthogonalize=true,
-        principal=:lower, use_optimization=false, verbose=:false,
-        quad_kwargs=(add_endpoint=:left,))
+        principal=:lower, use_optimization=false, verbose=false,
+        quad_kwargs=(add_endpoint=:left, lost_digits=8))
     println("\nConstructed operator:")
     println(fsbp)
 
@@ -155,7 +242,7 @@ setprecision(BigFloat, 20; base=10) do
 end
 
 # ═════════════════════════════════════════════════════════════════════════════
-# Example 4: Exponential basis (needs optimization) — degree 2+1
+# Example 5: Exponential basis (needs optimization) — degree 2+1
 #   F = {1, x, x², x³, e^x}                  (nb = 5)
 #   G = {1, x, x², x³, x⁴, x⁵, e^x, xe^x, x²e^x, x³e^x, e^2x, x⁶}  (12 functions → GLL → 6 nodes)
 # ═════════════════════════════════════════════════════════════════════════════
@@ -164,7 +251,7 @@ end
 quad_kwargs = (lost_digits = 12, add_endpoint = :left)
 
 println("=" ^ 70)
-println("Example 4: Exponential-GLL p=3+1 operator")
+println("Example 5: Exponential-GLL p=3+1 operator")
 println("=" ^ 70)
 setprecision(BigFloat, 24; base=10) do
     ref = BigFloat(-1), BigFloat(1)
