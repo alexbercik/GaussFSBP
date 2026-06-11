@@ -117,10 +117,11 @@ products of pairs of approximation functions.
   `build_fsbp_operator` keywords.
 - `verbose::Bool=false` — print quadrature and builder diagnostics; forwarded
   to the optimized path when `use_optimization=true`.
-- `opt_kwargs...` — additional optimization keywords accepted only when
-  `use_optimization=true` and forwarded unchanged to
-  [`optimize_fsbp_operator`](@ref) (the quadrature basis is passed separately as
-  the required `quad_basis` argument).  This is where optimization controls such as
+- `opt_kwargs...` — additional optimization keywords forwarded unchanged to
+  [`optimize_fsbp_operator`](@ref) when `use_optimization=true` and ignored by
+  the direct construction path when `use_optimization=false` (the quadrature
+  basis is passed separately as the required `quad_basis` argument).  This is
+  where optimization controls such as
   `test_functions`, `test_derivatives`, `test_weights`,
   `extrapolation_objective_weights`, `S_objective_weights`,
   `derivative_error_norm`, `zero_boundary_scaling`, `extrapolation_symmetry`,
@@ -161,11 +162,6 @@ function build_fsbp_operator(op_basis, quad_basis;
         throw(ArgumentError(
             "add_endpoint is a quadrature keyword. Pass it as " *
             "quad_kwargs=(add_endpoint=...,), not as a top-level keyword."))
-    end
-    if !use_optimization && !isempty(opt_kwargs)
-        names = join(string.(keys(opt_kwargs)), ", ")
-        throw(ArgumentError(
-            "optimization keyword(s) require use_optimization=true: $names"))
     end
     _require_function_basis_intervals_match(op_basis, quad_basis, "build_fsbp_operator")
 

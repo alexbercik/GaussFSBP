@@ -410,7 +410,7 @@ Common optimization keywords:
 - `simultaneous_max_iter`, `simultaneous_step_tol`,
   `simultaneous_grad_tol`, `simultaneous_obj_tol`: local solver controls.
 
-Optimization keywords are accepted only when `use_optimization=true`.
+When `use_optimization=false`, these optimization keywords are ignored. 
 
 ## Direct Quadrature Use
 
