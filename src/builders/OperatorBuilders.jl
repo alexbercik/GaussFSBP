@@ -121,8 +121,9 @@ products of pairs of approximation functions.
   `orthogonalize=true`, `measure` is also used for the GeneralizedGauss
   orthogonalization.  `principal` and `verbose` remain top-level
   `build_fsbp_operator` keywords.
-- `verbose::Bool=false` — print quadrature and builder diagnostics; forwarded
-  to the optimized path when `use_optimization=true`.
+- `verbose::Bool=false` — print quadrature diagnostics and a construction
+  summary.  The direct path reports its selected construction and exactness
+  residuals; the optimized path additionally reports optimization diagnostics.
 - `opt_kwargs...` — additional optimization keywords forwarded unchanged to
   [`optimize_fsbp_operator`](@ref) when `use_optimization=true` and ignored by
   the direct construction path when `use_optimization=false` (the quadrature
@@ -272,8 +273,8 @@ function build_fsbp_operator(op_basis, quad_basis;
     # ── Step 3: Build Vandermonde matrices ───────────────────────────────
     V  = eval_basis_matrix(op_basis, x)             # nn × nb
     Vx = eval_basis_derivative_matrix(op_basis, x)   # nn × nb
-    _check_vandermonde_rank(V, nb, T; rank_tol,
-                                      context = "build_fsbp_operator")
+    rankV = _check_vandermonde_rank(V, nb, T; rank_tol,
+                                              context = "build_fsbp_operator")
 
     # ── Step 4: Save quadrature H ────────────────────────────────────────
     H = Diagonal(w)
@@ -291,6 +292,51 @@ function build_fsbp_operator(op_basis, quad_basis;
         D, Q, S = _build_operator_square(V, Vx, H, E, nn)
     else
         D, Q, S = _build_operator_rectangular(V, Vx, H, E, nn, nb)
+    end
+
+    if verbose
+        # Report only inexpensive diagnostics already available from the
+        # construction.  Full quadrature verification remains opt-in through
+        # check_fsbp_operator because it may require reference integrations.
+        left_endpoint_idx = _endpoint_node_index(x, a)
+        right_endpoint_idx = _endpoint_node_index(x, b)
+        construction = nn == nb ? "square (unique)" :
+                                  "rectangular (minimum-norm)"
+        left_extrapolation = left_endpoint_idx === nothing ?
+            "minimum-norm ($extrapolation_norm)" :
+            "nodal (node $left_endpoint_idx)"
+        right_extrapolation = right_endpoint_idx === nothing ?
+            "minimum-norm ($extrapolation_norm)" :
+            "nodal (node $right_endpoint_idx)"
+
+        # Compatibility depends only on the quadrature and approximation
+        # basis, whereas the remaining residuals verify the constructed
+        # extrapolation and operator matrices.
+        HVx = Vx .* reshape(w, :, 1)
+        compatibility_residual = norm(
+            V' * HVx + HVx' * V - (vR * vR' - vL * vL'))
+        left_extrapolation_residual = norm(V' * tL - vL)
+        right_extrapolation_residual = norm(V' * tR - vR)
+        derivative_residual = norm(D * V - Vx)
+        sbp_residual = norm(Q + Q' - E)
+        skew_residual = norm(S + S')
+
+        println("\nDirect FSBP construction")
+        println("  num of nodes = $nn")
+        println("  dim of basis = $nb")
+        println("  rank(V) = $rankV")
+        println("  construction = $construction")
+        println("  left extrapolation = $left_extrapolation")
+        println("  right extrapolation = $right_extrapolation")
+        println("  extrapolation norm = $extrapolation_norm")
+        println("Quadrature/SBP compatibility residual = $compatibility_residual")
+        println("After direct construction:")
+        println("  ||V^T tL - v_L|| = $left_extrapolation_residual")
+        println("  ||V^T tR - v_R|| = $right_extrapolation_residual")
+        println("  ||D V - V_x|| = $derivative_residual")
+        println("  ||Q + Q^T - E|| = $sbp_residual")
+        println("  ||S + S^T|| = $skew_residual")
+        println("\n")
     end
 
     return FSBPOperator{T}(D, H, Q, S, E, tL, tR, x, w,
