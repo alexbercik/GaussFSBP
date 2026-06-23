@@ -119,11 +119,14 @@ products of pairs of approximation functions.
   `add_endpoint`, `solver_tolerance`, `intermediate_tolerance`,
   `differentiable`, `measure`, and nonlinear solver options.  When
   `orthogonalize=true`, `measure` is also used for the GeneralizedGauss
-  orthogonalization.  `principal` and `verbose` remain top-level
-  `build_fsbp_operator` keywords.
-- `verbose::Bool=false` — print quadrature diagnostics and a construction
-  summary.  The direct path reports its selected construction and exactness
-  residuals; the optimized path additionally reports optimization diagnostics.
+  orthogonalization.  `principal` remains a top-level keyword.  An optional
+  `verbose` entry in `quad_kwargs` overrides quadrature diagnostics only;
+  when omitted, quadrature verbosity follows the top-level `verbose` flag.
+- `verbose::Bool=false` — print FSBP construction diagnostics.  The direct
+  path reports its selected construction and exactness residuals; the
+  optimized path additionally reports optimization diagnostics.  Quadrature
+  rule generation uses the same flag unless overridden by
+  `quad_kwargs=(verbose=...,)`.
 - `opt_kwargs...` — additional optimization keywords forwarded unchanged to
   [`optimize_fsbp_operator`](@ref) when `use_optimization=true` and ignored by
   the direct construction path when `use_optimization=false` (the quadrature
@@ -185,7 +188,7 @@ function build_fsbp_operator(op_basis, quad_basis;
         "op_basis interval type ($T)."))
     _validate_norm_symbol(extrapolation_norm, (:Hinv, :H, :Euclidean, :Frobenius),
                           "extrapolation_norm")
-    reserved_quad_keys = (:principal, :verbose, :moments)
+    reserved_quad_keys = (:principal, :moments)
     conflicting_quad_keys = [key for key in keys(quad_kwargs) if key in reserved_quad_keys]
     if !isempty(conflicting_quad_keys)
         names = join(string.(conflicting_quad_keys), ", ")
@@ -193,6 +196,9 @@ function build_fsbp_operator(op_basis, quad_basis;
             "quad_kwargs must not contain top-level quadrature keyword(s): $names. " *
             "Pass explicit moments with the top-level quad_moments keyword."))
     end
+    quad_verbose = get(quad_kwargs, :verbose, verbose)
+    remaining_quad_kwargs = NamedTuple(
+        key => quad_kwargs[key] for key in keys(quad_kwargs) if key != :verbose)
 
     # ── Step 1: Build GeneralizedGauss basis for the quadrature basis ────
     # GeneralizedGauss can use analytic derivatives, finite differences, or
@@ -233,12 +239,14 @@ function build_fsbp_operator(op_basis, quad_basis;
     #   principal=:left → Left-Radau (right endpoint, n+1 nodes for 2n+1 basis)
     if gg_moments === nothing
         w, x = GeneralizedGauss.compute_gauss_rule(gg_quad_basis;
-                                                   principal, verbose,
-                                                   quad_kwargs...)
+                                                   principal,
+                                                   verbose = quad_verbose,
+                                                   remaining_quad_kwargs...)
     else
         w, x = GeneralizedGauss.compute_gauss_rule(gg_quad_basis, gg_moments;
-                                                   principal, verbose,
-                                                   quad_kwargs...)
+                                                     principal,
+                                                     verbose = quad_verbose,
+                                                     remaining_quad_kwargs...)
     end
     x = collect(x)
     w = collect(w)

@@ -254,7 +254,7 @@ using LinearAlgebra
 
 
     # ═════════════════════════════════════════════════════════════════════
-    # Test 7: verbose keyword is forwarded to GeneralizedGauss construction
+    # Test 7: verbose keyword controls FSBP output; quad_kwargs can override
     # ═════════════════════════════════════════════════════════════════════
 
     @testset "Verbose construction keyword" begin
@@ -266,13 +266,32 @@ using LinearAlgebra
         qderivs = [x -> 0.0, x -> 1.0]
         quad_basis = FunctionBasis(qfuncs; derivs=qderivs)
 
-        fsbp = redirect_stdout(devnull) do
-            build_fsbp_operator(op_basis, quad_basis;
-                                principal=:upper, verbose=true)
+        verbose_output = mktemp() do _, io
+            redirect_stdout(io) do
+                build_fsbp_operator(op_basis, quad_basis;
+                                    principal=:upper, verbose=true)
+            end
+            flush(io)
+            seekstart(io)
+            read(io, String)
         end
 
-        @test fsbp.nn == 2
-        @test all(fsbp.w .> 0)
+        @test occursin("Direct FSBP construction", verbose_output)
+        @test occursin("Computing two-point Lobatto rule", verbose_output)
+
+        quiet_quad_output = mktemp() do _, io
+            redirect_stdout(io) do
+                build_fsbp_operator(op_basis, quad_basis;
+                                    principal=:upper, verbose=true,
+                                    quad_kwargs=(verbose=false,))
+            end
+            flush(io)
+            seekstart(io)
+            read(io, String)
+        end
+
+        @test occursin("Direct FSBP construction", quiet_quad_output)
+        @test !occursin("Computing two-point Lobatto rule", quiet_quad_output)
     end
 
     @testset "Quadrature kwargs are forwarded" begin
