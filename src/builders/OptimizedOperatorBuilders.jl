@@ -47,11 +47,11 @@ optimization paths.  The default `:none` treats the two boundaries separately.
 - `test_derivatives=Function[]` — derivatives of `test_functions`.  If
   `test_functions` is a `FunctionBasis` and this is empty, the basis derivatives
   are used.
-- `test_weights=nothing` — positive weights for the test-function objectives;
+- `test_weights=nothing` — non-negative weights for the test-function objectives;
   `nothing` uses unit weights.
-- `extrapolation_objective_weights=(accuracy=1//2, norm=1//2)` — weights for
+- `extrapolation_objective_weights=(accuracy=1//2, norm=1//2)` — non-negative weights for
   extrapolation test accuracy and extrapolation norm objectives.
-- `S_objective_weights=(accuracy=1//2, norm=1//2)` — weights for derivative
+- `S_objective_weights=(accuracy=1//2, norm=1//2)` — non-negative weights for derivative
   test accuracy and upwind Jacobian Frobenius norm objectives.
 - `extrapolation_norm::Symbol=:Hinv` — the weighted norm to use for tL, tR.
   Allowed values are `:Hinv`, `:H`, `:Euclidean`.
@@ -315,14 +315,10 @@ function _optimize_fsbp_operator_sequential_core(setup, V, Vx, vL, vR, op_basis,
     # -- Extract the optimization weights for the tL/tR and S optimizations
     #    _acc weights the accuracy on the test_funcs (either extrapolation or derivative)
     #    _norm weights the norm of the operators (tL/tR or A = D + H^(-1) tL tL^T)
-    theta_ext_acc = T(_objective_weight(extrapolation_objective_weights, :accuracy, 1, 1//2))
-    theta_ext_norm = T(_objective_weight(extrapolation_objective_weights, :norm, 2, 1//2))
-    theta_S_acc = T(_objective_weight(S_objective_weights, :accuracy, 1, 1//2))
-    theta_S_norm = T(_objective_weight(S_objective_weights, :norm, 2, 1//2))
-    theta_ext_acc < zero(T) && throw(ArgumentError("extrapolation accuracy weight must be nonnegative."))
-    theta_ext_norm < zero(T) && throw(ArgumentError("extrapolation norm weight must be nonnegative."))
-    theta_S_acc < zero(T) && throw(ArgumentError("S objective accuracy weight must be nonnegative."))
-    theta_S_norm < zero(T) && throw(ArgumentError("S objective norm weight must be nonnegative."))
+    theta_ext_acc, theta_ext_norm = _extract_objective_weights(
+        T, extrapolation_objective_weights, "extrapolation_objective_weights")
+    theta_S_acc, theta_S_norm = _extract_objective_weights(
+        T, S_objective_weights, "S_objective_weights")
 
     ext_scale_tol = extrapolation_scale_tol === nothing ? sqrt(eps(T)) : T(extrapolation_scale_tol)
     der_scale_tol = derivative_scale_tol === nothing ? sqrt(eps(T)) : T(derivative_scale_tol)
@@ -677,14 +673,10 @@ function _optimize_fsbp_operator_simultaneous_core(setup, V, Vx, vL, vR, op_basi
     # -- Extract the optimization weights
     #    _acc weights the accuracy on the test_funcs (either extrapolation or derivative)
     #    _norm weights the norm of the operators (tL/tR or A = D + H^(-1) tL tL^T)
-    theta_ext_acc = T(_objective_weight(extrapolation_objective_weights, :accuracy, 1, 1//2))
-    theta_ext_norm = T(_objective_weight(extrapolation_objective_weights, :norm, 2, 1//2))
-    theta_S_acc = T(_objective_weight(S_objective_weights, :accuracy, 1, 1//2))
-    theta_S_norm = T(_objective_weight(S_objective_weights, :norm, 2, 1//2))
-    theta_ext_acc < zero(T) && throw(ArgumentError("extrapolation accuracy weight must be nonnegative."))
-    theta_ext_norm < zero(T) && throw(ArgumentError("extrapolation norm weight must be nonnegative."))
-    theta_S_acc < zero(T) && throw(ArgumentError("S objective accuracy weight must be nonnegative."))
-    theta_S_norm < zero(T) && throw(ArgumentError("S objective norm weight must be nonnegative."))
+    theta_ext_acc, theta_ext_norm = _extract_objective_weights(
+        T, extrapolation_objective_weights, "extrapolation_objective_weights")
+    theta_S_acc, theta_S_norm = _extract_objective_weights(
+        T, S_objective_weights, "S_objective_weights")
 
     ext_scale_tol = extrapolation_scale_tol === nothing ? sqrt(eps(T)) : T(extrapolation_scale_tol)
     der_scale_tol = derivative_scale_tol === nothing ? sqrt(eps(T)) : T(derivative_scale_tol)
@@ -1975,8 +1967,27 @@ function _test_weights(::Type{T}, M::Int, weights) where T
     length(weights) == M ||
         throw(ArgumentError("test_weights has length $(length(weights)), expected $M."))
     omega = T.(collect(weights))
-    any(omega .<= zero(T)) && throw(ArgumentError("All test_weights must be positive."))
+    any(omega .< zero(T)) && throw(ArgumentError("All test_weights must be non-negative."))
     return omega
+end
+
+function _validate_objective_weights(weights, name::AbstractString)
+    vals = if weights isa NamedTuple
+        collect(values(weights))
+    elseif weights isa Tuple
+        collect(weights)
+    else
+        throw(ArgumentError("$name must be a NamedTuple or Tuple, got $(typeof(weights))."))
+    end
+    any(v -> v < 0, vals) &&
+        throw(ArgumentError("All $name must be non-negative."))
+    return nothing
+end
+
+function _extract_objective_weights(::Type{T}, weights, name::AbstractString) where T
+    _validate_objective_weights(weights, name)
+    return (T(_objective_weight(weights, :accuracy, 1, 1//2)),
+            T(_objective_weight(weights, :norm, 2, 1//2)))
 end
 
 function _objective_weight(weights, key::Symbol, idx::Int, default)
