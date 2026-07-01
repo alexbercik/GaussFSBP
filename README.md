@@ -409,8 +409,9 @@ Common optimization keywords:
 - `zero_boundary_scaling`: `:fallback` or `:omit` for tests whose boundary
   scale is zero.
 - `extrapolation_symmetry`: `:none` or `:flip`.
-- `compatibility_action`: `:warn`, `:error`, or `:ignore` if quadrature/SBP
-  compatibility is not within tolerance.
+- `sbp_check_action`: `:error` (default), `:warn`, or `:ignore` when a construction-time
+  SBP check fails (quadrature/SBP compatibility, boundary-matrix consistency,
+  flip-symmetric grid/constraint checks).
 - `opt_method`: `:simultaneous` or `:sequential`.
 - `simultaneous_num_starts`: number of local optimization starts for the
   simultaneous method.

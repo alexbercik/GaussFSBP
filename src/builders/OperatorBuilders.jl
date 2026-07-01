@@ -109,6 +109,10 @@ products of pairs of approximation functions.
   Allowed values are `:Hinv`, `:H`, `:Euclidean`.
 - `rank_tol=nothing` — tolerance for Vandermonde rank checks and, in the
   optimized path, rank-truncated pseudoinverse/nullspace computations.
+- `sbp_check_action::Symbol=:error` — action when a construction-time SBP check
+  fails in the direct path: `:error` (default), `:warn`, or `:ignore`.  When
+  `use_optimization=true`, this keyword is forwarded to
+  [`optimize_fsbp_operator`](@ref) together with `opt_kwargs...`.
 - `quad_moments=nothing` — optional exact moments of the original `quad_basis`
   in its original order.  When supplied, these moments are passed to
   `GeneralizedGauss.compute_gauss_rule` instead of being computed numerically.
@@ -135,7 +139,7 @@ products of pairs of approximation functions.
   `test_functions`, `test_derivatives`, `test_weights`,
   `extrapolation_objective_weights`, `S_objective_weights`,
   `derivative_error_norm`, `zero_boundary_scaling`, `extrapolation_symmetry`,
-  `compatibility_action`, objective tolerances, `opt_method`, and simultaneous
+  `sbp_check_action`, objective tolerances, `opt_method`, and simultaneous
   solver/search options should be supplied.
 
 # Quadrature Rules
@@ -162,6 +166,7 @@ function build_fsbp_operator(op_basis, quad_basis;
                               principal::Symbol = :lower,
                               extrapolation_norm::Symbol = :Hinv,
                               rank_tol = nothing,
+                              sbp_check_action::Symbol = :error,
                               quad_moments = nothing,
                               quad_kwargs::NamedTuple = NamedTuple(),
                               verbose::Bool = false,
@@ -175,6 +180,7 @@ function build_fsbp_operator(op_basis, quad_basis;
             "quad_kwargs=(add_endpoint=...,), not as a top-level keyword."))
     end
     _require_function_basis_intervals_match(op_basis, quad_basis, "build_fsbp_operator")
+    _validate_sbp_check_action(sbp_check_action)
 
     # ── Extract interval ─────────────────────────────────────────────────
     interval = op_basis.interval
@@ -273,6 +279,7 @@ function build_fsbp_operator(op_basis, quad_basis;
                                       extrapolation_norm = extrapolation_norm,
                                       rank_tol = rank_tol,
                                       verbose = verbose,
+                                      sbp_check_action = sbp_check_action,
                                       opt_kwargs...)
     end
 
@@ -290,6 +297,7 @@ function build_fsbp_operator(op_basis, quad_basis;
     # ── Step 5: Build extrapolation operators ────────────────────────────
     vL = eval_basis_vector(op_basis, a)
     vR = eval_basis_vector(op_basis, b)
+    _check_sbp_compatibility(V, Vx, w, vL, vR, T; action = sbp_check_action)
     tL, tR = _build_extrapolation(V, x, w, vL, vR, a, b, extrapolation_norm)
 
     # ── Step 6: Boundary matrix E ────────────────────────────────────────
@@ -297,7 +305,7 @@ function build_fsbp_operator(op_basis, quad_basis;
 
     # ── Step 7: Construct D, Q, and S using the extrapolation boundary E ──
     if nn == nb
-        D, Q, S = _build_operator_square(V, Vx, H, E, nn)
+        D, Q, S = _build_operator_square(V, Vx, H, E, nn; action = sbp_check_action)
     else
         D, Q, S = _build_operator_rectangular(V, Vx, H, E, nn, nb)
     end
@@ -363,7 +371,7 @@ of basis functions (nn == nb). The derivative operator is unique:
 D = Vₓ V⁻¹ and Q = H D.  The resulting boundary matrix Q + Qᵀ is checked
 against the extrapolation boundary matrix E, then S = Q - E/2.
 """
-function _build_operator_square(V, Vx, H, E, nn)
+function _build_operator_square(V, Vx, H, E, nn; action::Symbol = :error)
     T = eltype(V)
 
     # D = Vx / V  (i.e., D * V = Vx  =>  D = Vx V⁻¹)
@@ -375,7 +383,7 @@ function _build_operator_square(V, Vx, H, E, nn)
     # The unique square construction determines Q + Qᵀ. It must agree
     # with the boundary matrix induced by the extrapolation operators.
     E_from_Q = Q + Q'
-    _check_boundary_matrix_match(E_from_Q, E)
+    _check_boundary_matrix_match(E_from_Q, E; action = action)
 
     # S = Q - E/2  (skew-symmetric part)
     S = Q - E / T(2)
@@ -473,21 +481,6 @@ function _build_operator_rectangular(V, Vx, H, E, nn, nb)
     D = Q ./ reshape(w, :, 1)
 
     return D, Q, S
-end
-
-function _check_boundary_matrix_match(E_from_Q, E)
-    eltype(E_from_Q) == eltype(E) || throw(ArgumentError(
-        "Boundary matrix type mismatch: $(eltype(E_from_Q)) vs $(eltype(E))."))
-    T = eltype(E)
-    residual = maximum(abs.(E_from_Q - E))
-    scale = max(one(T), maximum(abs.(E_from_Q)), maximum(abs.(E)))
-    tol = T(100) * sqrt(eps(T)) * scale
-    if residual > tol
-        error("Boundary matrix from the unique square operator does not match " *
-              "the extrapolation boundary matrix: residual $residual exceeds " *
-              "tolerance $tol.")
-    end
-    return residual
 end
 
 # ─────────────────────────────────────────────────────────────────────────────

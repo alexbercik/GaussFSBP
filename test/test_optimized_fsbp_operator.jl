@@ -18,7 +18,7 @@ _optimize_test_quad_basis(funcs, derivs, xL = -1.0, xR = 1.0) =
         op = optimize_fsbp_operator(x, w, -1.0, 1.0, funcs, derivs, _optimize_test_quad_basis(funcs, derivs);
                                     test_functions = tests,
                                     test_derivatives = test_derivs,
-                                    compatibility_action = :error)
+                                    sbp_check_action = :error)
 
         V = eval_basis_matrix(op.op_basis, op.x)
         Vx = eval_basis_derivative_matrix(op.op_basis, op.x)
@@ -47,7 +47,7 @@ _optimize_test_quad_basis(funcs, derivs, xL = -1.0, xR = 1.0) =
         op = optimize_fsbp_operator(x, w, -1.0, 1.0, funcs, derivs, _optimize_test_quad_basis(funcs, derivs);
                                     test_functions = tests,
                                     test_derivatives = test_derivs,
-                                    compatibility_action = :error)
+                                    sbp_check_action = :error)
 
         V = eval_basis_matrix(op.op_basis, op.x)
         Vx = eval_basis_derivative_matrix(op.op_basis, op.x)
@@ -64,7 +64,7 @@ _optimize_test_quad_basis(funcs, derivs, xL = -1.0, xR = 1.0) =
                 optimize_fsbp_operator(x, w, -1.0, 1.0, funcs, derivs, _optimize_test_quad_basis(funcs, derivs);
                                        test_functions = tests,
                                        test_derivatives = test_derivs,
-                                       compatibility_action = :error,
+                                       sbp_check_action = :error,
                                        verbose = true)
             end
             flush(io)
@@ -130,12 +130,12 @@ _optimize_test_quad_basis(funcs, derivs, xL = -1.0, xR = 1.0) =
                                            [1.0 / 3.0, 4.0 / 3.0, 1.0 / 3.0],
                                            -1.0, 1.0, funcs, derivs, _optimize_test_quad_basis(funcs, derivs);
                                            opt_method = :sequential,
-                                           compatibility_action = :error)
+                                           sbp_check_action = :error)
         fixed_sim = optimize_fsbp_operator([-1.0, 0.0, 1.0],
                                            [1.0 / 3.0, 4.0 / 3.0, 1.0 / 3.0],
                                            -1.0, 1.0, funcs, derivs, _optimize_test_quad_basis(funcs, derivs);
                                            opt_method = :simultaneous,
-                                           compatibility_action = :error)
+                                           sbp_check_action = :error)
         @test fixed_sim.tL == fixed_seq.tL
         @test fixed_sim.tR == fixed_seq.tR
         @test fixed_sim.S ≈ fixed_seq.S
@@ -147,7 +147,7 @@ _optimize_test_quad_basis(funcs, derivs, xL = -1.0, xR = 1.0) =
                 optimize_fsbp_operator([-a2, a2], [1.0, 1.0],
                                        -1.0, 1.0, funcs, derivs, _optimize_test_quad_basis(funcs, derivs);
                                        opt_method = :simultaneous,
-                                       compatibility_action = :error,
+                                       sbp_check_action = :error,
                                        verbose = true)
             end
             flush(io)
@@ -157,7 +157,7 @@ _optimize_test_quad_basis(funcs, derivs, xL = -1.0, xR = 1.0) =
         nofree = optimize_fsbp_operator([-a2, a2], [1.0, 1.0],
                                         -1.0, 1.0, funcs, derivs, _optimize_test_quad_basis(funcs, derivs);
                                         opt_method = :simultaneous,
-                                        compatibility_action = :error)
+                                        sbp_check_action = :error)
         V = eval_basis_matrix(nofree.op_basis, nofree.x)
         Vx = eval_basis_derivative_matrix(nofree.op_basis, nofree.x)
         @test occursin("coupled nullspace dimension is zero", nofree_output)
@@ -195,7 +195,7 @@ _optimize_test_quad_basis(funcs, derivs, xL = -1.0, xR = 1.0) =
                                           test_functions = [tests[1]],
                                           test_derivatives = [test_derivs[1]],
                                           opt_method = :simultaneous,
-                                          compatibility_action = :error,
+                                          sbp_check_action = :error,
                                           simultaneous_num_starts = 3)
         V = eval_basis_matrix(onefixed.op_basis, onefixed.x)
         Vx = eval_basis_derivative_matrix(onefixed.op_basis, onefixed.x)
@@ -216,25 +216,25 @@ _optimize_test_quad_basis(funcs, derivs, xL = -1.0, xR = 1.0) =
                                         opt_method = :simultaneous,
                                         simultaneous_num_starts = 1,
                                         simultaneous_max_iter = 0,
-                                        compatibility_action = :error)
+                                        sbp_check_action = :error)
         sim_op = optimize_fsbp_operator(x4, w4, -1.0, 1.0, funcs, derivs, _optimize_test_quad_basis(funcs, derivs);
                                         test_functions = tests,
                                         test_derivatives = test_derivs,
                                         opt_method = :simultaneous,
                                         simultaneous_num_starts = 4,
-                                        compatibility_action = :error)
+                                        sbp_check_action = :error)
         seq_op = optimize_fsbp_operator(x4, w4, -1.0, 1.0, funcs, derivs, _optimize_test_quad_basis(funcs, derivs);
                                         test_functions = tests,
                                         test_derivatives = test_derivs,
                                         opt_method = :sequential,
-                                        compatibility_action = :error)
+                                        sbp_check_action = :error)
         sim_from_seq = optimize_fsbp_operator(x4, w4, -1.0, 1.0, funcs, derivs, _optimize_test_quad_basis(funcs, derivs);
                                               test_functions = tests,
                                               test_derivatives = test_derivs,
                                               opt_method = :simultaneous,
                                               simultaneous_init = :sequential,
                                               simultaneous_num_starts = 1,
-                                              compatibility_action = :error)
+                                              sbp_check_action = :error)
         V = eval_basis_matrix(sim_op.op_basis, sim_op.x)
         Vx = eval_basis_derivative_matrix(sim_op.op_basis, sim_op.x)
         @test norm(sim_op.D * V - Vx) < 1e-10
@@ -249,7 +249,7 @@ _optimize_test_quad_basis(funcs, derivs, xL = -1.0, xR = 1.0) =
                                         BigFloat(-1), BigFloat(1), funcs, derivs,
                                         _optimize_test_quad_basis(funcs, derivs, BigFloat(-1), BigFloat(1));
                                         opt_method = :simultaneous,
-                                        compatibility_action = :error)
+                                        sbp_check_action = :error)
         V = eval_basis_matrix(big_op.op_basis, big_op.x)
         Vx = eval_basis_derivative_matrix(big_op.op_basis, big_op.x)
         @test big_op isa FSBPOperator{BigFloat}
@@ -265,7 +265,7 @@ _optimize_test_quad_basis(funcs, derivs, xL = -1.0, xR = 1.0) =
             test_derivatives = [test_derivs[1]],
             opt_method = :simultaneous,
             simultaneous_num_starts = 1,
-            compatibility_action = :error)
+            sbp_check_action = :error)
         V = eval_basis_matrix(big_onefixed.op_basis, big_onefixed.x)
         Vx = eval_basis_derivative_matrix(big_onefixed.op_basis, big_onefixed.x)
         @test big_onefixed isa FSBPOperator{BigFloat}
@@ -291,7 +291,7 @@ _optimize_test_quad_basis(funcs, derivs, xL = -1.0, xR = 1.0) =
                                     test_functions = tests,
                                     test_derivatives = test_derivs,
                                     extrapolation_symmetry = :flip,
-                                    compatibility_action = :error)
+                                    sbp_check_action = :error)
 
         V = eval_basis_matrix(op.op_basis, op.x)
         vL = eval_basis_vector(op.op_basis, -1.0)
@@ -305,7 +305,7 @@ _optimize_test_quad_basis(funcs, derivs, xL = -1.0, xR = 1.0) =
                                              [1.0 / 3.0, 4.0 / 3.0, 1.0 / 3.0],
                                              -1.0, 1.0, funcs, derivs, _optimize_test_quad_basis(funcs, derivs);
                                              extrapolation_symmetry = :flip,
-                                             compatibility_action = :error)
+                                             sbp_check_action = :error)
         @test endpoint_op.tL == [1.0, 0.0, 0.0]
         @test endpoint_op.tR == [0.0, 0.0, 1.0]
 
@@ -315,7 +315,7 @@ _optimize_test_quad_basis(funcs, derivs, xL = -1.0, xR = 1.0) =
                                        test_functions = tests,
                                        test_derivatives = test_derivs,
                                        extrapolation_symmetry = :flip,
-                                       compatibility_action = :error,
+                                       sbp_check_action = :error,
                                        verbose = true)
             end
             flush(io)
@@ -328,10 +328,11 @@ _optimize_test_quad_basis(funcs, derivs, xL = -1.0, xR = 1.0) =
         @test occursin("coupled tL/tR optimization active", verbose_output)
         @test !occursin("extrapolation_symmetry=:flip uses the existing sequential", verbose_output)
 
-        @test_throws ArgumentError optimize_fsbp_operator([-0.9, 0.0, 1.0],
-                                                          [1.0, 1.0, 1.0],
-                                                          -1.0, 1.0, funcs, derivs, _optimize_test_quad_basis(funcs, derivs);
-                                                          extrapolation_symmetry = :flip)
+        @test_throws ErrorException optimize_fsbp_operator([-0.9, 0.0, 1.0],
+                                                           [1.0, 1.0, 1.0],
+                                                           -1.0, 1.0, funcs, derivs, _optimize_test_quad_basis(funcs, derivs);
+                                                           extrapolation_symmetry = :flip,
+                                                           sbp_check_action = :error)
     end
 
     @testset "split extrapolation normalization" begin
@@ -423,7 +424,7 @@ _optimize_test_quad_basis(funcs, derivs, xL = -1.0, xR = 1.0) =
 
         op = optimize_fsbp_operator(x, w, a, b, funcs, derivs,
                                     _optimize_test_quad_basis(funcs, derivs, a, b);
-                                    compatibility_action = :error)
+                                    sbp_check_action = :error)
 
         V = eval_basis_matrix(op.op_basis, op.x)
         Vx = eval_basis_derivative_matrix(op.op_basis, op.x)

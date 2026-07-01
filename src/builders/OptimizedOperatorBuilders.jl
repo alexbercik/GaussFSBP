@@ -65,8 +65,8 @@ optimization paths.  The default `:none` treats the two boundaries separately.
   nullspace computations.
 - `compatibility_tol=nothing` — tolerance for the quadrature/SBP compatibility
   residual.  `nothing` selects a type-scaled default.
-- `compatibility_action::Symbol=:warn` — action when compatibility exceeds the
-  tolerance: `:warn`, `:error`, or `:ignore`.
+- `sbp_check_action::Symbol=:error` — action when a construction-time SBP check
+  fails: `:error` (default), `:warn`, or `:ignore`.
 - `extrapolation_scale_tol=nothing`, `derivative_scale_tol=nothing`,
   `objective_tol=nothing` — tolerances controlling objective block scaling and
   omission.  `nothing` selects defaults based on the working scalar type.
@@ -184,7 +184,7 @@ function _optimize_fsbp_preamble(x, w, xL, xR, value_eval, deriv_eval, K::Int; k
     opt_method = get(kwargs, :opt_method, :simultaneous)
     simultaneous_nonlinear_solver = get(kwargs, :simultaneous_nonlinear_solver, :levenberg_marquardt)
     simultaneous_init = get(kwargs, :simultaneous_init, :minimum_norm)
-    compatibility_action = get(kwargs, :compatibility_action, :warn)
+    sbp_check_action = get(kwargs, :sbp_check_action, :error)
     simultaneous_num_starts = get(kwargs, :simultaneous_num_starts, 10)
     simultaneous_max_iter = get(kwargs, :simultaneous_max_iter, 1000)
     simultaneous_global_num_candidates = get(kwargs, :simultaneous_global_num_candidates, nothing)
@@ -206,8 +206,7 @@ function _optimize_fsbp_preamble(x, w, xL, xR, value_eval, deriv_eval, K::Int; k
         throw(ArgumentError("simultaneous_nonlinear_solver must be :levenberg_marquardt, :gauss_newton, or :auto."))
     simultaneous_init in (:minimum_norm, :sequential) ||
         throw(ArgumentError("simultaneous_init must be :minimum_norm or :sequential."))
-    compatibility_action in (:warn, :error, :ignore) ||
-        throw(ArgumentError("compatibility_action must be :warn, :error, or :ignore."))
+    _validate_sbp_check_action(sbp_check_action)
     simultaneous_num_starts >= 1 ||
         throw(ArgumentError("simultaneous_num_starts must be at least 1."))
     simultaneous_max_iter >= 0 ||
@@ -301,7 +300,7 @@ function _optimize_fsbp_operator_sequential_core(setup, V, Vx, vL, vR, op_basis,
                                       zero_boundary_scaling::Symbol = :fallback,
                                       rank_tol = nothing,
                                       compatibility_tol = nothing,
-                                      compatibility_action::Symbol = :warn,
+                                      sbp_check_action::Symbol = :error,
                                       extrapolation_scale_tol = nothing,
                                       derivative_scale_tol = nothing,
                                       objective_tol = nothing,
@@ -353,10 +352,10 @@ function _optimize_fsbp_operator_sequential_core(setup, V, Vx, vL, vR, op_basis,
                            zeros(T, N, 0)
 
     if extrapolation_symmetry === :flip
-        _check_flip_symmetric_grid(x, w, xL, xR)
+        _check_flip_symmetric_grid(x, w, xL, xR; action = sbp_check_action)
         tL0, tR0, Zflip = _build_flip_symmetric_extrapolation(
             V, w, vL, vR, x, xL, xR, left_endpoint_idx, right_endpoint_idx,
-            extrapolation_norm; rank_tol = rank_tol)
+            extrapolation_norm; rank_tol = rank_tol, action = sbp_check_action)
         nL = size(Zflip, 2)
         nR = nL
         tL_has_free_parameters = nL > 0
@@ -460,22 +459,11 @@ function _optimize_fsbp_operator_sequential_core(setup, V, Vx, vL, vR, op_basis,
     end
 
     # -- Get ready for S optimization: check the SBP compatibility first
-    compat_residual_matrix = _sbp_compatibility_residual(V, Vx, w, vL, vR)
-    compat_residual = _frobenius_norm(compat_residual_matrix)
-    compat_scale = max(one(T), _frobenius_norm(V' * _scale_rows(Vx, w)),
-                         _frobenius_norm(vR * vR' - vL * vL'))
-    compat_tol_eff = compatibility_tol === nothing ?
-        T(100) * sqrt(eps(T)) * compat_scale : T(compatibility_tol)
+    compat_residual = _check_sbp_compatibility(V, Vx, w, vL, vR, T;
+                                               compatibility_tol = compatibility_tol,
+                                               action = sbp_check_action)
     if verbose
         println("Quadrature/SBP compatibility residual = $compat_residual")
-    end
-    if compat_residual > compat_tol_eff
-        msg = "Quadrature/SBP compatibility residual $compat_residual exceeds tolerance $compat_tol_eff; exact construction of S may be impossible."
-        if compatibility_action === :error
-            error(msg)
-        elseif compatibility_action === :warn
-            _stderr_warn(msg)
-        end
     end
 
     # -- Construct the linear system for S optimization
@@ -619,7 +607,7 @@ function _optimize_fsbp_operator_simultaneous_core(setup, V, Vx, vL, vR, op_basi
                                                    zero_boundary_scaling::Symbol = :fallback,
                                                    rank_tol = nothing,
                                                    compatibility_tol = nothing,
-                                                   compatibility_action::Symbol = :warn,
+                                                   sbp_check_action::Symbol = :error,
                                                    extrapolation_scale_tol = nothing,
                                                    derivative_scale_tol = nothing,
                                                    objective_tol = nothing,
@@ -646,7 +634,7 @@ function _optimize_fsbp_operator_simultaneous_core(setup, V, Vx, vL, vR, op_basi
         zero_boundary_scaling,
         rank_tol,
         compatibility_tol,
-        compatibility_action,
+        sbp_check_action,
         extrapolation_scale_tol,
         derivative_scale_tol,
         objective_tol,
@@ -659,7 +647,7 @@ function _optimize_fsbp_operator_simultaneous_core(setup, V, Vx, vL, vR, op_basi
     left_is_endpoint = left_endpoint_idx !== nothing
     right_is_endpoint = right_endpoint_idx !== nothing
     if extrapolation_symmetry === :flip
-        _check_flip_symmetric_grid(x, w, xL, xR)
+        _check_flip_symmetric_grid(x, w, xL, xR; action = sbp_check_action)
     end
     if left_is_endpoint && right_is_endpoint
         verbose && println("# -- Both endpoints are fixed; falling back to sequential optimization.")
@@ -701,7 +689,7 @@ function _optimize_fsbp_operator_simultaneous_core(setup, V, Vx, vL, vR, op_basi
     if extrapolation_symmetry === :flip
         tL0, tR0, Zflip = _build_flip_symmetric_extrapolation(
             V, w, vL, vR, x, xL, xR, left_endpoint_idx, right_endpoint_idx,
-            extrapolation_norm; rank_tol = rank_tol)
+            extrapolation_norm; rank_tol = rank_tol, action = sbp_check_action)
         nT = size(Zflip, 2)
         nL = nT
         nR = nT
@@ -751,21 +739,10 @@ function _optimize_fsbp_operator_simultaneous_core(setup, V, Vx, vL, vR, op_basi
     end
 
     # -- Get ready for optimization: check the SBP compatibility first
-    compat_residual_matrix = _sbp_compatibility_residual(V, Vx, w, vL, vR)
-    compat_residual = _frobenius_norm(compat_residual_matrix)
-    compat_scale = max(one(T), _frobenius_norm(V' * _scale_rows(Vx, w)),
-                         _frobenius_norm(vR * vR' - vL * vL'))
-    compat_tol_eff = compatibility_tol === nothing ?
-        T(100) * sqrt(eps(T)) * compat_scale : T(compatibility_tol)
+    compat_residual = _check_sbp_compatibility(V, Vx, w, vL, vR, T;
+                                               compatibility_tol = compatibility_tol,
+                                               action = sbp_check_action)
     verbose && println("Quadrature/SBP compatibility residual = $compat_residual")
-    if compat_residual > compat_tol_eff
-        msg = "Quadrature/SBP compatibility residual $compat_residual exceeds tolerance $compat_tol_eff; exact construction of S may be impossible."
-        if compatibility_action === :error
-            error(msg)
-        elseif compatibility_action === :warn
-            _stderr_warn(msg)
-        end
-    end
 
     # -- Construct the linear system for optimization
     pairs = _skew_pairs(N) # vector of index pairs (i, j) with i < j for S[i,j]
@@ -2130,29 +2107,6 @@ function _minimum_extrapolation_solution(V, w, b, norm_backend::Symbol)
     return MV * (G \ b)
 end
 
-function _symmetry_tolerance(scale, ::Type{T}) where T
-    return T(100) * sqrt(eps(T)) * max(one(T), scale)
-end
-
-function _check_flip_symmetric_grid(x, w, xL, xR)
-    T = eltype(x)
-    node_scale = max(one(T), maximum(abs.(x)), abs(xL), abs(xR))
-    node_tol = _symmetry_tolerance(node_scale, T)
-    center = xL + xR
-    node_err = maximum(abs.(x .+ reverse(x) .- center))
-    node_err <= node_tol || throw(ArgumentError(
-        "extrapolation_symmetry=:flip requires reflection-paired nodes; " *
-        "max |x[i] + x[N+1-i] - (xL+xR)| = $node_err exceeds $node_tol."))
-
-    weight_scale = max(one(T), maximum(abs.(w)))
-    weight_tol = _symmetry_tolerance(weight_scale, T)
-    weight_err = maximum(abs.(w .- reverse(w)))
-    weight_err <= weight_tol || throw(ArgumentError(
-        "extrapolation_symmetry=:flip requires reflection-paired weights; " *
-        "max |w[i] - w[N+1-i]| = $weight_err exceeds $weight_tol."))
-    return nothing
-end
-
 function _minimum_extrapolation_constraint_solution(C, w, d, norm_backend::Symbol;
                                                     rank_tol)
     Ct = Matrix(transpose(C))
@@ -2168,21 +2122,11 @@ function _minimum_extrapolation_constraint_solution(C, w, d, norm_backend::Symbo
     return MinvCt * _pseudoinverse_solve(C * MinvCt, d; rank_tol = rank_tol)
 end
 
-function _check_constraint_residual(C, t, d, context::AbstractString)
-    T = eltype(t)
-    residual = _euclidean_norm(C * t - d)
-    scale = max(one(T), _frobenius_norm(C) * _euclidean_norm(t), _euclidean_norm(d))
-    tol = T(1000) * sqrt(eps(T)) * scale
-    residual <= tol || throw(ArgumentError(
-        "$context: exact flip-symmetric extrapolation constraints are inconsistent; " *
-        "residual $residual exceeds $tol."))
-    return nothing
-end
-
 function _build_flip_symmetric_extrapolation(V, w, vL, vR, x, xL, xR,
                                              left_endpoint_idx,
                                              right_endpoint_idx,
-                                             norm_backend::Symbol; rank_tol)
+                                             norm_backend::Symbol; rank_tol,
+                                             action::Symbol = :error)
     T = eltype(w)
     N = length(w)
     if left_endpoint_idx !== nothing || right_endpoint_idx !== nothing
@@ -2205,7 +2149,7 @@ function _build_flip_symmetric_extrapolation(V, w, vL, vR, x, xL, xR,
     d = vcat(vL, vR)
     tL0 = _minimum_extrapolation_constraint_solution(C, w, d, norm_backend;
                                                      rank_tol = rank_tol)
-    _check_constraint_residual(C, tL0, d, "extrapolation_symmetry=:flip")
+    _check_constraint_residual(C, tL0, d, "extrapolation_symmetry=:flip"; action = action)
     Zflip = _nullspace_basis(C; rank_tol = rank_tol)
     return tL0, reverse(tL0), Zflip
 end
@@ -2495,11 +2439,6 @@ end
 # ─────────────────────────────────────────────────────────────────────────────
 # Independent-equation skew system
 # ─────────────────────────────────────────────────────────────────────────────
-
-function _sbp_compatibility_residual(V, Vx, w, vL, vR)
-    return V' * _scale_rows(Vx, w) + Vx' * _scale_rows(V, w) -
-           (vR * vR' - vL * vL')
-end
 
 # Upper-triangle index pairs (i, j) with i < j: independent entries of an N×N skew matrix.
 function _skew_pairs(N::Int)

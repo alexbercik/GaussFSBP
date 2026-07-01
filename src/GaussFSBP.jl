@@ -22,6 +22,7 @@ import GenericLinearAlgebra
 # ── Utilities (type checks before basis construction) ─────────────────────────
 include("utils/TypeConsistency.jl")
 include("utils/LinearAlgebraHelpers.jl")
+include("utils/SBPConstructionChecks.jl")
 
 # ── Basis ────────────────────────────────────────────────────────────────────
 include("basis/Basis.jl")
