@@ -21,7 +21,7 @@ Result returned by `check_quadrature_exactness`.
 - `max_error::T` — maximum absolute error over all basis functions.
 - `errors::Vector{T}` — per-basis-function absolute errors.
 - `reference_orders::Vector{Int}` — final Gauss-Legendre order used for each
-  basis function's reference integral.
+  basis function's reference integral, or `0` when exact moments were supplied.
 - `min_weight::T` — minimum quadrature weight in the candidate rule.
 """
 struct QuadratureExactnessReport{T<:AbstractFloat}
@@ -59,7 +59,8 @@ end
                                interval=(-1.0, 1.0),
                                atol=1e-12,
                                rtol=1e-12,
-                               max_ref_order=4096) -> QuadratureExactnessReport
+                               max_ref_order=4096,
+                               quad_moments=nothing) -> QuadratureExactnessReport
 
 Check whether the candidate quadrature rule with nodes `x` and weights `w`
 exactly integrates every function in `quadbasis`.
@@ -75,6 +76,9 @@ The arithmetic precision is inferred from the element type of `w`.
 - `rtol` — relative tolerance (default: precision-dependent).
 - `max_ref_order` — maximum Gauss-Legendre order for reference integral
   (default `4096`).
+- `quad_moments` — optional exact moments of `quadbasis`, in the same order as
+  the supplied basis functions.  When supplied, these moments are used directly
+  as the reference integrals instead of adaptive Gauss-Legendre integration.
 
 # Returns
 A `QuadratureExactnessReport`.
@@ -85,9 +89,9 @@ The candidate quadrature integral of a function `g` is computed as:
 
     I_candidate = sum(w[i] * g(x[i]) for i in eachindex(x))
 
-The reference integral is computed by `reference_integral_gausslegendre`,
-which adaptively increases the Gauss-Legendre order until the estimate
-stabilises.
+Unless `quad_moments` is supplied, the reference integral is computed by
+`reference_integral_gausslegendre`, which adaptively increases the
+Gauss-Legendre order until the estimate stabilises.
 
 The test passes for function `g` iff:
 
@@ -97,7 +101,8 @@ function check_quadrature_exactness(quadbasis, x, w;
                                     interval = (-1.0, 1.0),
                                     atol = nothing,
                                     rtol = nothing,
-                                    max_ref_order::Int = 4096)
+                                    max_ref_order::Int = 4096,
+                                    quad_moments = nothing)
     x = collect(x)
     w = collect(w)
     T = _array_element_type(w, "quadrature weights")
@@ -119,19 +124,36 @@ function check_quadrature_exactness(quadbasis, x, w;
     orders   = Vector{Int}(undef, nf)
     refs     = Vector{T}(undef, nf)
 
+    if quad_moments !== nothing
+        raw_quad_moments = collect(quad_moments)
+        raw_quad_moments isa AbstractVector || throw(ArgumentError(
+            "quad_moments must be a vector-like collection with one moment " *
+            "per quadrature basis function."))
+        length(raw_quad_moments) == nf || throw(ArgumentError(
+            "quad_moments has length $(length(raw_quad_moments)), expected " *
+            "$nf for the supplied quadrature basis."))
+
+        refs .= T.(raw_quad_moments)
+    end
+
     for (k, g) in enumerate(funcs)
-        # Candidate integral
+        # Candidate integral from the supplied rule.
         I_cand = sum(w[i] * g(x[i]) for i in eachindex(x))
 
-        # Reference integral (adaptive Gauss-Legendre)
-        I_ref, ord = reference_integral_gausslegendre(
-            g, interval; T = T,
-            atol = _atol / 10, rtol = _rtol / 10,
-            max_order = max_ref_order)
+        if quad_moments === nothing
+            # Reference integral from adaptive Gauss-Legendre integration.
+            I_ref, ord = reference_integral_gausslegendre(
+                g, interval; T = T,
+                atol = _atol / 10, rtol = _rtol / 10,
+                max_order = max_ref_order)
+            refs[k] = T(I_ref)
+            orders[k] = ord
+        else
+            # Exact moments were supplied, so no reference integration was run.
+            orders[k] = 0
+        end
 
-        refs[k]   = T(I_ref)
-        errors[k] = abs(T(I_cand) - T(I_ref))
-        orders[k] = ord
+        errors[k] = abs(T(I_cand) - refs[k])
     end
 
     max_err = maximum(errors)

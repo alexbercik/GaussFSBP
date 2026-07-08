@@ -164,39 +164,14 @@ Check 2: Quadrature exactness — reuse existing check_quadrature_exactness.
 """
 function _check_quadrature_exactness(op::FSBPOperator{T}, atol, rtol, max_ref_order,
                                      quad_moments = nothing) where T
-    if quad_moments !== nothing
-        raw_quad_moments = collect(quad_moments)
-        raw_quad_moments isa AbstractVector || throw(ArgumentError(
-            "quad_moments must be a vector-like collection with one moment " *
-            "per quadrature basis function."))
-        length(raw_quad_moments) == nbasis(op.quad_basis) || throw(ArgumentError(
-            "quad_moments has length $(length(raw_quad_moments)), expected " *
-            "$(nbasis(op.quad_basis)) for op.quad_basis."))
-
-        refs = T.(raw_quad_moments)
-        funcs = basis_functions(op.quad_basis)
-        errors = Vector{T}(undef, length(funcs))
-        for (k, g) in enumerate(funcs)
-            candidate = sum(op.w[i] * g(op.x[i]) for i in eachindex(op.x))
-            errors[k] = abs(T(candidate) - refs[k])
-        end
-
-        max_err = maximum(errors)
-        n_failed = count(k -> errors[k] > atol + rtol * abs(refs[k]),
-                         1:length(errors))
-        passed = n_failed == 0
-        detail = if passed
-            "max error = $(Printf.@sprintf("%.2e", Float64(max_err))) (all $(length(errors)) exact)"
-        else
-            "max error = $(Printf.@sprintf("%.2e", Float64(max_err))) ($n_failed/$(length(errors)) failed)"
-        end
-        return (passed=passed, error=max_err, detail=detail)
-    end
-
+    # Use the public quadrature checker for both adaptive reference integrals
+    # and exact user-supplied moments.  This keeps tolerance and error logic in
+    # one place while this wrapper only adapts the result to FSBPOperatorReport.
     report = check_quadrature_exactness(op.quad_basis, op.x, op.w;
                                         interval=op.interval,
                                         atol=atol, rtol=rtol,
-                                        max_ref_order=max_ref_order)
+                                        max_ref_order=max_ref_order,
+                                        quad_moments=quad_moments)
 
     detail = if report.passed
         "max error = $(Printf.@sprintf("%.2e", Float64(report.max_error))) (all $(length(report.errors)) exact)"

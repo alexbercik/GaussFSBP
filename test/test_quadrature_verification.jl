@@ -83,6 +83,27 @@ end
     @test report.passed
 end
 
+@testset "check_quadrature_exactness — explicit moments" begin
+    moments = [2.0, 0.0, 2.0 / 3.0, 0.0]
+
+    # Exact moments should replace adaptive reference integration.
+    report = check_quadrature_exactness(poly_funcs, GL2_nodes, GL2_weights;
+                                        quad_moments=moments)
+
+    @test report.passed
+    @test report.max_error < 1e-12
+    @test report.reference_orders == zeros(Int, length(poly_funcs))
+    @test report._reference_integrals ≈ moments
+
+    # The same moments should expose that the midpoint rule is not exact for x^2.
+    failed_report = check_quadrature_exactness(poly_funcs, MP1_nodes, MP1_weights;
+                                               quad_moments=moments)
+    @test !failed_report.passed
+
+    @test_throws ArgumentError check_quadrature_exactness(
+        poly_funcs, GL2_nodes, GL2_weights; quad_moments=[2.0, 0.0])
+end
+
 @testset "QuadratureExactnessReport show" begin
     report = check_quadrature_exactness(poly_funcs, GL2_nodes, GL2_weights)
     buf = IOBuffer()
