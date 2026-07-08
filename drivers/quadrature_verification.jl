@@ -1,5 +1,5 @@
 """
-    quadrature_verification_driver.jl
+    quadrature_verification.jl
 
 Driver demonstrating how to use `check_quadrature_exactness` to verify that a
 candidate quadrature rule integrates a given basis exactly.

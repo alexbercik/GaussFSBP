@@ -38,6 +38,10 @@ fsbp.nn         # number of quadrature nodes
 fsbp.nb         # number of approximation basis functions
 ```
 
+Note: Exact moments passed with `quad_moments` are used during construction but
+are not stored in `FSBPOperator`; pass them again to verification routines when
+want exact-moment checks.
+
 ## Setup
 
 GaussFSBP depends on the local unregistered quadrature package
@@ -48,9 +52,12 @@ lib/GeneralizedGauss.jl
 ```
 
 That path must contain the `GeneralizedGauss.jl` repository, either as an
-actual directory or as a symlink:
+actual directory or as a symlink.  The repository includes a placeholder
+directory at that path; replace it with the real checkout or with a symlink:
 
 ```bash
+rm -f lib/GeneralizedGauss.jl/.gitkeep  # only if it is still the placeholder
+rmdir lib/GeneralizedGauss.jl
 ln -s /path/to/GeneralizedGauss.jl lib/GeneralizedGauss.jl
 ```
 
@@ -371,9 +378,10 @@ Useful `quad_kwargs` entries:
   `true`; use derivative-free MADS solves when `false`.
 - `max_adaptive_steps`: maximum number of continuation retries.
 
-Do not put `principal` or `verbose` inside `quad_kwargs`; those are top-level
-`build_fsbp_operator` keywords.  Also do not put moments inside `quad_kwargs`;
-pass them with top-level `quad_moments`.
+Do not put `principal` or moments inside `quad_kwargs`; pass them with the
+top-level `principal` and `quad_moments` keywords.  Use top-level `verbose` for
+the whole builder, or `quad_kwargs=(verbose=...,)` when only quadrature
+diagnostics should be overridden.
 
 ### Optimization Keywords
 
@@ -454,6 +462,16 @@ report = check_fsbp_operator(fsbp; atol=1e-10, rtol=1e-10)
 println(report)
 ```
 
+If exact moments are available, pass them to the verification so the
+quadrature check does not recompute adaptive reference integrals:
+
+```julia
+report = check_fsbp_operator(fsbp;
+                             atol=1e-10,
+                             rtol=1e-10,
+                             quad_moments=quad_moments)
+```
+
 The report checks:
 
 - derivative exactness on `op_basis`
@@ -476,6 +494,8 @@ report = check_quadrature_exactness(quad_basis, fsbp.x, fsbp.w;
                                     rtol=1e-12)
 println(report)
 ```
+
+Note: As before you can pass exact moments directly with the kwarg `quad_moments'
 
 ## Exporting Operators
 
@@ -534,13 +554,16 @@ check quadrature rules independently of the FSBP builder.
 |   |   `-- OptimizedOperatorBuilders.jl
 |   |-- verification/
 |   |   |-- QuadratureVerification.jl
-|   |   `-- OperatorVerification.jl
+|   |   |-- OperatorVerification.jl
+|   |   `-- Verification.jl
 |   |-- io/
 |   |   `-- FSBPOperatorPythonExport.jl
 |   `-- utils/
 |       |-- LinearAlgebraHelpers.jl
 |       |-- ReferenceIntegrals.jl
-|       `-- TypeConsistency.jl
+|       |-- SBPConstructionChecks.jl
+|       |-- TypeConsistency.jl
+|       `-- calc_basis.py
 |-- test/
 |-- drivers/
 `-- lib/

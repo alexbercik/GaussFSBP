@@ -19,8 +19,8 @@ using GaussFSBP
 @testset "Polynomial SBP placeholders" begin
 
     @testset "LGL operators (TODO)" begin
-        # TODO: Once OperatorBuilders is implemented, construct the degree-p
-        # LGL operator and verify:
+        # TODO: Add regression fixtures for known degree-p LGL operators and
+        # verify:
         #   1. D * V = Vx
         #   2. Q + Q' = E
         #   3. H * ones(n) = w  (LGL weights)
@@ -30,8 +30,8 @@ using GaussFSBP
     end
 
     @testset "LG operators (TODO)" begin
-        # TODO: Once OperatorBuilders is implemented, construct the degree-p
-        # Legendre-Gauss (interior-node) operator and verify:
+        # TODO: Add regression fixtures for known degree-p Legendre-Gauss
+        # interior-node operators and verify:
         #   1. D * V = Vx
         #   2. Q + Q' = E  (with extrapolation operators to boundary)
         #   3. H * ones(n) = w  (LG weights)

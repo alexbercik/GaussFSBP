@@ -1,5 +1,5 @@
 """
-    build_operator_driver.jl
+    build_operator.jl
 
 Driver demonstrating end-to-end construction and verification of FSBP
 operators using `build_fsbp_operator` and `check_fsbp_operator`.
@@ -9,11 +9,10 @@ bases.  The square-root example demonstrates passing explicit quadrature
 moments for endpoint-singular functions.
 
 Usage:
-    julia --project=. drivers/build_operator_driver.jl
+    julia --project=. drivers/build_operator.jl
 """
 
 using GaussFSBP
-using LinearAlgebra
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -35,7 +34,7 @@ qfuncs  = [let k=k; x -> x^k end for k in 0:(2p - 1)]
 qderivs = [let k=k; k == 0 ? (x -> 0.0) : (x -> k * x^(k-1)) end for k in 0:(2p - 1)]
 quad_basis = FunctionBasis(qfuncs; derivs=qderivs, interval=(-1.0, 1.0))
 
-println("Approximation basis: degree-$p monomials, $(nbasis(op_basis)) functions")
+println("Approximation basis: degree-$p polynomials, $(nbasis(op_basis)) functions")
 println("Quadrature basis: $(nbasis(quad_basis)) functions")
 
 fsbp = build_fsbp_operator(op_basis, quad_basis; orthogonalize=true, principal=:upper)
@@ -78,7 +77,7 @@ op_basis = FunctionBasis(funcs; derivs=derivs, interval=(-1.0, 1.0))
 qfuncs, qderivs = legendre_functions(2p+2, -1.0, 1.0)
 quad_basis = FunctionBasis(qfuncs; derivs=qderivs, interval=(-1.0, 1.0))
 
-println("Approximation basis: degree-$p monomials, $(nbasis(op_basis)) functions")
+println("Approximation basis: degree-$p polynomials, $(nbasis(op_basis)) functions")
 println("Quadrature basis: $(nbasis(quad_basis)) functions")
 
 fsbp = build_fsbp_operator(op_basis, quad_basis; orthogonalize=false, principal=:lower, verbose=false)
@@ -219,7 +218,7 @@ setprecision(BigFloat, 20; base=10) do
     qderivs = vcat(qderivs_poly, qderivs_exp, qderivs_exp2)
     quad_basis = FunctionBasis(qfuncs; derivs=qderivs, interval=ref)
 
-    println("Approximation basis: degree-$p monomials + e^x, $(nbasis(op_basis)) functions")
+    println("Approximation basis: degree-$p polynomials + e^x, $(nbasis(op_basis)) functions")
     println("Quadrature basis: $(nbasis(quad_basis)) functions")
 
     fsbp = build_fsbp_operator(op_basis, quad_basis; orthogonalize=true,
@@ -277,7 +276,7 @@ setprecision(BigFloat, 24; base=10) do
     qderivs = vcat(qderivs_poly, qderivs_exp, qderivs_exp2)
     quad_basis = FunctionBasis(qfuncs; derivs=qderivs, interval=ref)
 
-    println("Approximation basis: degree-$p monomials + e^x, $(nbasis(op_basis)) functions")
+    println("Approximation basis: degree-$p polynomials + e^x, $(nbasis(op_basis)) functions")
     println("Quadrature basis: $(nbasis(quad_basis)) functions")
 
     opt_funcs = [x -> x^i * exp(x) for i in p+1:p+2]
@@ -288,9 +287,9 @@ setprecision(BigFloat, 24; base=10) do
 
     fsbp = build_fsbp_operator(op_basis, quad_basis; orthogonalize=true,
         principal=:lower, use_optimization=true, opt_method=:simultaneous,
-        quad_kwargs=quad_kwargs,
         simultaneous_num_starts=30,
-        verbose=true, test_functions=opt_funcs, test_derivatives=opt_derivs, test_weights=test_weights,
+        verbose=true, quad_kwargs=(; quad_kwargs..., verbose=true),
+        test_functions=opt_funcs, test_derivatives=opt_derivs, test_weights=test_weights,
         extrapolation_objective_weights=extrap_weights, S_objective_weights=S_weights)
     println("\nConstructed operator:")
     println(fsbp)
