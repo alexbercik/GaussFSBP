@@ -1,9 +1,20 @@
-# Julia build artifacts and local machine-specific files
+# Julia build artifacts
 Manifest.toml
 *.jl.cov
 *.jl.*.cov
 *.jl.mem
 /docs/build/
 
+# OS/editor-local files
+.DS_Store
+.vscode/
+
 # Local unregistered dependency (separate git repository)
 lib/GeneralizedGauss.jl/
+
+# Local scratch notes and reference material not needed to run the package
+latex_doc/
+papers/
+
+# Scratch drivers are useful locally but should not ship as examples.
+drivers/temp*.jl

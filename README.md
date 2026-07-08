@@ -72,8 +72,8 @@ julia --project=.
 ] dev lib/GeneralizedGauss.jl
 ```
 
-If `julia` is not on your shell path but Julia is installed at
-`/opt/local/bin/julia`, use that full path in the commands below.
+If `julia` is not on your shell path, replace it with the full path to your
+local Julia executable in the commands below.
 
 ## Quick Start
 
