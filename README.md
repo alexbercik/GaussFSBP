@@ -3,6 +3,9 @@
 GaussFSBP builds one-dimensional diagonal-norm function-space
 summation-by-parts (FSBP) operators from some callable basis functions.
 
+For a description of the algorithms, see the paper:
+> Bercik, Patrascu, Zingg (2026), "Construction and Optimization of Summation-By-Parts Operators for General Function Spaces Using an Improved Generalized Gaussian Quadrature Algorithm" ([arXiv:2607.08934](https://arxiv.org/abs/2607.08934)).
+
 At a high level, the workflow is:
 
 1. Define an approximation basis `F` with functions and derivatives.
